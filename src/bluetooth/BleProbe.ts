@@ -16,19 +16,41 @@ export class BleProbe extends EventTarget {
     this.subscriptions.forEach((handler, key) => this.characteristics.get(key)?.removeEventListener('characteristicvaluechanged', handler));
     this.subscriptions.clear(); this.characteristics.clear();
   }
-  async connect(optionalServices: string[]) {
+  /**
+   * With `namePrefix`, first tries a device this site was already allowed to use (no chooser at all, where the
+   * browser supports getDevices), otherwise opens a chooser listing only devices with that name prefix.
+   * Without it, the chooser lists every device (diagnostic lab).
+   */
+  async connect(optionalServices: string[], namePrefix?: string) {
     if (!navigator.bluetooth || !isSecureContext) throw new Error('需要支援 Web Bluetooth 的瀏覽器與 HTTPS（或 localhost）。');
     this.disconnect();
     this.status = 'Connecting'; this.changed();
     try {
+      const known = namePrefix ? await this.knownDevice(namePrefix) : undefined;
       // Must run directly in a user gesture. No guessed service identifiers.
-      const device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices });
+      const device = known ?? await navigator.bluetooth.requestDevice(namePrefix
+        ? { filters: [{ namePrefix }], optionalServices } : { acceptAllDevices: true, optionalServices });
       this.device?.removeEventListener('gattserverdisconnected', this.disconnected);
       this.device = device; this.services = []; this.logger.clear(); this.startedAt = new Date().toISOString();
       device.addEventListener('gattserverdisconnected', this.disconnected);
       if (!device.gatt) throw new Error('此設備沒有可用的 GATT server。');
-      await device.gatt.connect(); this.status = 'Connected'; this.changed();
+      const gatt = device.gatt;
+      try {
+        if (!known) await gatt.connect();
+        else await Promise.race([gatt.connect(), new Promise((_, reject) => setTimeout(() => { gatt.disconnect(); reject(new Error('timeout')); }, 10000))]);
+      }
+      catch (error) {
+        // A remembered device that is asleep or out of range: forget the shortcut for this visit so the next tap opens the chooser.
+        if (known) { this.skipKnown = true; throw new Error('無法直接連上之前配對過的體脂計（可能還在休眠或不在附近）。請讓體脂計顯示畫面後再按一次，這次會出現選擇清單。'); }
+        throw error;
+      }
+      this.status = 'Connected'; this.changed();
     } catch (error) { this.status = 'Disconnected'; this.changed(); throw error; }
+  }
+  private skipKnown = false;
+  private async knownDevice(namePrefix: string): Promise<BluetoothDevice | undefined> {
+    if (this.skipKnown || typeof navigator.bluetooth.getDevices !== 'function') return undefined;
+    try { return (await navigator.bluetooth.getDevices()).find(d => d.name?.startsWith(namePrefix)); } catch { return undefined; }
   }
   disconnect() { this.device?.gatt?.disconnect(); this.cleanup(); this.status = 'Disconnected'; this.changed(); }
   async enumerate() {
