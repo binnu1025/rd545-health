@@ -85,6 +85,19 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
     }, done);
   }
 
+  /** Copies people and measurements from the spreadsheet this browser used before Google sign-in (Apps Script). */
+  async function importLegacy(): Promise<string> {
+    const legacy = loadConfig();
+    if (!legacy) return '';
+    const old = await listAll(legacy);
+    for (const p of old.people) if (!people().some(x => x.id === p.id)) await savePerson(store!, { ...p, 身高cm: String(p.身高cm), 出生日期: String(p.出生日期), 體脂計本人: String(p.體脂計本人) });
+    const added = await saveRecords(store!, old.records.map(r => ({ ...r, 量測時間: new Date(String(r['量測時間'])).toISOString() })));
+    saveConfig(null);
+    if (!selected()) { selectedId = owner()?.id ?? people()[0]?.id ?? null; saveSelectedPerson(selectedId); }
+    return `已從舊試算表搬入 ${old.people.length} 位人員、${added} 筆紀錄。`;
+  }
+  const legacyBox = () => loadConfig() ? '<div class="import"><h3>你之前的數據</h3><p class="hint">這個瀏覽器記得你之前用的試算表。按一下就把人員和量測紀錄搬進你帳號的新試算表（重複的會略過，舊試算表保留不動）。</p><button data-act="migrate">搬入之前的數據</button></div>' : '';
+
   function signInView() {
     const hint = rememberedEmail();
     section.innerHTML = `<h2>歡迎</h2><p class="hint">用 Google 帳號登入。人員和量測紀錄會存在你自己雲端硬碟裡的試算表，任何手機或電腦登入同一個帳號都看得到。</p>
@@ -98,7 +111,8 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
     section.innerHTML = `${stepper(2)}<h2>連接你的體脂計</h2>
       <p class="hint">網頁需要一組「身分」才能和你的體脂計對話。載入一次後會存進你的試算表，之後每台裝置登入就自動取得。</p>
       <label>身分檔（identity-probe.json）<input type="file" accept=".json" data-field="identity"></label>
-      <p class="hint">還沒有身分檔？網頁自己和體脂計配對的功能開發中，完成後這一步會改成「按一下配對」。</p><p role="status">${esc(message)}</p>`;
+      <p class="hint">還沒有身分檔？網頁自己和體脂計配對的功能開發中，完成後這一步會改成「按一下配對」。</p>${legacyBox()}<p role="status">${esc(message)}</p>`;
+    on('migrate', () => void act(importLegacy));
     section.querySelector<HTMLInputElement>('[data-field=identity]')!.onchange = e => void act(async () => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
@@ -121,7 +135,8 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
         <label>性別<select name="性別"><option value="male" ${p?.sex === 'male' ? 'selected' : ''}>男</option><option value="female" ${p?.sex === 'female' ? 'selected' : ''}>女</option></select></label>
         <label>出生日期<input name="出生日期" type="date" required value="${birth}"></label>
         <label>身高 (cm)<input name="身高cm" type="number" min="80" max="250" step="0.1" required value="${p?.heightCm ?? ''}"></label>
-        <button type="submit" ${busy ? 'disabled' : ''}>完成</button></form><p role="status">${esc(message)}</p>`;
+        <button type="submit" ${busy ? 'disabled' : ''}>完成</button></form>${legacyBox()}<p role="status">${esc(message)}</p>`;
+    on('migrate', () => void act(importLegacy));
     on('profile', () => void useScale('profile', '已讀取體脂計資料。'));
     personForm('owner', true);
   }
@@ -154,13 +169,7 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
     on('sync', () => void useScale('stored', '已同步體脂計的結果。'));
     on('refresh', () => void act(async () => { store = await load(store!.spreadsheetId); }));
     on('signout', () => { signOut(); store = null; fresh = null; message = '已登出。'; render(); });
-    on('migrate', () => void act(async () => {
-      const old = await listAll(legacy!);
-      for (const p of old.people) if (!people().some(x => x.id === p.id)) await savePerson(store!, { ...p, 身高cm: String(p.身高cm), 出生日期: String(p.出生日期), 體脂計本人: String(p.體脂計本人) });
-      const added = await saveRecords(store!, old.records.map(r => ({ ...r, 量測時間: new Date(String(r['量測時間'])).toISOString() })));
-      saveConfig(null);
-      return `已匯入 ${old.people.length} 位人員、${added} 筆紀錄。`;
-    }));
+    on('migrate', () => void act(importLegacy));
     // Result area: a fresh reading from this visit, otherwise the newest saved row; then the trend.
     const report = section.querySelector<HTMLElement>('.report')!;
     if (fresh) report.append(fresh);
