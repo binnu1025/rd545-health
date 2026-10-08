@@ -34,7 +34,8 @@ function axisFor(item: BarItem, value: number): [number, number] {
   if (item.axis) return item.axis;
   const { range, marker } = item;
   let min: number, max: number;
-  if (range) { const span = range.high - range.low; min = Math.max(0, range.low - span * 0.7); max = range.high + span * 1.3; }
+  if (range && !Number.isFinite(range.high)) { min = 0; max = Math.max(value, range.low) * 1.45; }
+  else if (range) { const span = range.high - range.low; min = Math.max(0, range.low - span * 0.7); max = range.high + span * 1.3; }
   else { const ref = Math.max(value, marker?.value ?? 0, item.goal ?? 0); min = 0; max = ref * 1.35 || 1; }
   // Keep the goal on the track too.
   if (item.goal != null) { if (item.goal > max) max = item.goal + (max - min) * 0.12; if (item.goal < min) min = Math.max(0, item.goal - (max - min) * 0.12); }
@@ -60,11 +61,12 @@ export function barModel(item: BarItem): BarModel | null {
   if (zero) model.ticks.push({ at: zero, label: '0' });
   if (item.range) {
     const r = item.range, j = judge(value, r);
-    model.zones = { low: pos(r.low), high: pos(r.high) };
-    model.ticks.push({ at: model.zones.low, label: fmt(r.low, item.digits) }, { at: model.zones.high, label: fmt(r.high, item.digits) });
+    model.zones = { low: pos(r.low), high: Number.isFinite(r.high) ? pos(r.high) : 100 };
+    model.ticks.push({ at: model.zones.low, label: fmt(r.low, item.digits) });
+    if (Number.isFinite(r.high)) model.ticks.push({ at: model.zones.high, label: fmt(r.high, item.digits) });
     model.state = j;
     model.verdict = r.labels[j === 'low' ? 0 : j === 'normal' ? 1 : 2] || (j === 'low' ? '偏低' : '偏高');
-    model.gap = j === 'normal' ? '在正常範圍內' : j === 'high' ? `超出正常上限 ${fmt(value - r.high, item.digits)} ${item.unit}` : `距正常下限還差 ${fmt(r.low - value, item.digits)} ${item.unit}`;
+    model.gap = j === 'normal' ? (Number.isFinite(r.high) ? '在正常範圍內' : `高於肌少症門檻 ${fmt(value - r.low, item.digits)} ${item.unit}`) : j === 'high' ? `超出正常上限 ${fmt(value - r.high, item.digits)} ${item.unit}` : `距正常下限還差 ${fmt(r.low - value, item.digits)} ${item.unit}`;
   } else if (item.marker) {
     const m = item.marker, diff = value - m.value;
     model.markerAt = pos(m.value);

@@ -1,5 +1,5 @@
 import type { BodyComposition } from '../bluetooth/bodyComposition';
-import { bmiRange, bodyFatRange, bodyWaterRange, muscleQualityRange, visceralFatRange, weightRange, type Sex } from '../health/standards';
+import { appendicularMuscleIndex, appendicularMuscleRange, bmiRange, bodyFatRange, bodyWaterRange, muscleQualityRange, visceralFatRange, weightRange, type Sex } from '../health/standards';
 import { renderBars, type BarItem } from './bodyBars';
 import { figureLegend, figureSvg, segmentNames, type SegmentKey } from './figure';
 
@@ -9,6 +9,8 @@ const signed = (value: number | null) => value === null ? '—' : value > 0 ? `+
 const scoreClass = (value: number | null) => value === null ? 'unknown' : value > 0 ? 'above' : value < 0 ? 'below' : 'standard';
 
 export interface ReportProfile { sex: Sex; age: number; heightCm: number }
+
+const asmi = (d: BodyComposition, heightCm: number | null) => appendicularMuscleIndex(['rightArm', 'leftArm', 'rightLeg', 'leftLeg'].map(k => d.segments[k as SegmentKey].muscleKg), heightCm);
 
 export interface Goals { weightKg?: number | null; bodyFatPct?: number | null }
 export function wholeBodyBars(d: BodyComposition, profile: ReportProfile | null, previous: BodyComposition | null = null, goals: Goals = {}): BarItem[] {
@@ -23,13 +25,14 @@ export function wholeBodyBars(d: BodyComposition, profile: ReportProfile | null,
     { label: '代謝年齡', unit: '歲', value: d.metabolicAge, digits: 0,
       marker: profile ? { value: profile.age, label: `實際 ${profile.age}`, describe: diff => diff > 0 ? `比實際年齡大 ${diff} 歲` : diff < 0 ? `比實際年齡年輕 ${-diff} 歲` : '與實際年齡相同' } : undefined },
     { label: '肌肉量', unit: 'kg', value: d.muscleMassKg, digits: 1 },
+    { label: '四肢肌肉指數', unit: 'kg/m²', value: asmi(d, height), digits: 2, range: profile ? appendicularMuscleRange(profile.sex) : null, note: '需性別才能判定' },
     { label: '肌肉評分', unit: '-4～+4', value: d.muscleScore, digits: 0, axis: [-4, 4], note: 'TANITA 評分，無公開範圍' },
     { label: '骨量', unit: 'kg', value: d.boneMassKg, digits: 1 },
     { label: '基礎代謝', unit: 'kcal', value: d.bmrKcal, digits: 0 },
   ];
   if (previous) {
     const before: Record<string, number | null> = { 體重: previous.weightKg, BMI: previous.bmi, 體脂率: previous.bodyFatPct, 內臟脂肪: previous.visceralFat, 體水分率: previous.bodyWaterPct,
-      肌肉品質: previous.muscleQuality, 代謝年齡: previous.metabolicAge, 肌肉量: previous.muscleMassKg, 肌肉評分: previous.muscleScore, 骨量: previous.boneMassKg, 基礎代謝: previous.bmrKcal };
+      肌肉品質: previous.muscleQuality, 代謝年齡: previous.metabolicAge, 肌肉量: previous.muscleMassKg, 四肢肌肉指數: asmi(previous, height), 肌肉評分: previous.muscleScore, 骨量: previous.boneMassKg, 基礎代謝: previous.bmrKcal };
     for (const item of items) item.previous = before[item.label] ?? null;
   }
   for (const item of items) {

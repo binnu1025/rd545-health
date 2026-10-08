@@ -47,6 +47,17 @@ export function muscleQualityRange(sex: Sex, age: number): Range | null {
   return { low: row[1], high: row[2], upperInclusive: true, source: tanita, labels: ['偏低', '標準', '偏高'] };
 }
 
+// AWGS 2019 (Asian Working Group for Sarcopenia, used by Taiwan's clinics and HPA materials): low muscle when the
+// appendicular skeletal muscle index (arms + legs muscle ÷ height²) measured by BIA is < 7.0 (men) / < 5.7 (women) kg/m².
+// Only a lower threshold exists, so `high` is Infinity.
+export const appendicularMuscleRange = (sex: Sex): Range => ({ low: sex === 'male' ? 7.0 : 5.7, high: Infinity, upperInclusive: true,
+  source: '亞洲肌少症工作小組 AWGS 2019（台灣臨床採用）', labels: ['肌少症風險', '無肌少症風險', ''] });
+/** Arms + legs muscle (kg) ÷ height² (m²); null when any limb is missing. */
+export function appendicularMuscleIndex(limbsKg: (number | null)[], heightCm: number | null): number | null {
+  if (!heightCm || limbsKg.some(v => v === null)) return null;
+  return Math.round((limbsKg as number[]).reduce((a, b) => a + b, 0) / (heightCm / 100) ** 2 * 100) / 100;
+}
+
 export type Judgement = 'low' | 'normal' | 'high';
 export function judge(value: number, range: Range): Judgement {
   if (value < range.low) return 'low';
