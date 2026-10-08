@@ -16,7 +16,7 @@ import { exportReport } from '../report/report';
  */
 const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 const uuidPattern = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
-const scaleNamePrefix = 'TNT_BW', identityKey = '體脂計身分';
+const scaleNamePrefix = 'TNT_BW', identityKey = '體脂計身分', deviceIdentityKey = 'rd545.identity';
 const sheetIdKey = (email: string) => `rd545.sheetId.${email}`;
 const local = { get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* visit-only */ } } };
 const isOwner = (p: Person | null | undefined) => p?.體脂計本人 === 'true';
@@ -61,7 +61,7 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
     store = await load(id);
     local.set(sheetIdKey(signedInEmail()), id);
     // A device set up with the old setup code still remembers the identity: adopt it instead of asking for the file.
-    const legacyIdentity = local.get('rd545.identity');
+    const legacyIdentity = local.get(deviceIdentityKey);
     if (!uuid && legacyIdentity && uuidPattern.test(legacyIdentity)) uuid = legacyIdentity.toLowerCase();
     await keepIdentity();
     if (!selected()) { selectedId = owner()?.id ?? people()[0]?.id ?? null; saveSelectedPerson(selectedId); }
@@ -71,6 +71,8 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
     if (!store) return;
     if (store.settings[identityKey]) uuid = store.settings[identityKey];
     else if (uuid) await saveSetting(store, identityKey, uuid);
+    // The identity belongs to the scale, not to a Google account: remember it on this device for every account.
+    if (uuid) local.set(deviceIdentityKey, uuid);
   }
   /** Rarely needed: point this account at a spreadsheet it already had (e.g. from the earlier Apps Script version). */
   async function useExistingSheet() {
@@ -133,7 +135,7 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
       if (file.size > 2048) throw Error('這不是身分檔，請選擇 identity-probe.json');
       const data = JSON.parse(await file.text());
       if (data.purpose !== 'RD545_IDENTITY_PROBE' || typeof data.appUuid !== 'string' || !uuidPattern.test(data.appUuid)) throw Error('身分檔格式錯誤');
-      uuid = data.appUuid.toLowerCase(); needIdentity = false;
+      uuid = data.appUuid.toLowerCase(); needIdentity = false; local.set(deviceIdentityKey, uuid);
       await saveSetting(store!, identityKey, uuid);
       return '已連接體脂計。請再按一次「開始量測」。';
     }));
