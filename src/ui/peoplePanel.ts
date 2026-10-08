@@ -2,7 +2,7 @@ import type { BodyComposition } from '../bluetooth/bodyComposition';
 import { buildAppsScript } from '../storage/appsScript';
 import { isWebAppUrl, listAll, loadConfig, loadSelectedPerson, newToken, saveConfig, savePerson, saveRecord, saveSelectedPerson, toRecord, type Person, type SheetConfig, type SheetRecord } from '../storage/sheetClient';
 import { renderTrend } from './trendChart';
-import { decodeSetup, encodeSetup, rememberUuid } from '../storage/deviceSetup';
+import { decodeSetup, encodeSetup, rememberUuid, setupLink } from '../storage/deviceSetup';
 import qrcode from 'qrcode-generator';
 
 const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -13,12 +13,17 @@ const isOwner = (p: Person | null) => p?.體脂計本人 === 'true';
 
 function renderSetupQr(code: string): HTMLElement {
   const box = document.createElement('div'); box.className = 'qr';
-  const qr = qrcode(0, 'M'); qr.addData(code); qr.make();
+  const link = setupLink(code);
+  const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
   const picture = document.createElement('div'); picture.className = 'qr-image'; picture.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 4, scalable: true });
-  const text = document.createElement('textarea'); text.readOnly = true; text.rows = 3; text.value = code;
+  const how = document.createElement('ol'); how.className = 'qr-steps';
+  for (const step of ['用手機相機（或 Chrome 網址列的掃描 QR 碼）對準這個圖案', '點跳出來的連結，用 Chrome 開啟', '看到「已套用設定」就完成了']) { const li = document.createElement('li'); li.textContent = step; how.append(li); }
+  const fallback = document.createElement('details'); const fs = document.createElement('summary'); fs.textContent = '沒辦法掃描？改用文字設定碼';
+  const text = document.createElement('textarea'); text.readOnly = true; text.rows = 3; text.value = code; fallback.append(fs, text);
   const note = document.createElement('p'); note.className = 'warn';
-  note.textContent = '這個 QR 碼可以讀寫你的試算表、也能以你的身分連線體脂計。只在自己的手機掃描，不要拍照傳給別人；用完按「顯示手機設定 QR 碼」收起。';
-  box.append(picture, note, text);
+  note.textContent = '這個 QR 碼可以讀寫你的試算表、也能以你的身分連線體脂計。只在自己的手機掃描，不要拍照傳給別人；用完再按一次按鈕收起。';
+  const side = document.createElement('div'); side.append(how, note);
+  box.append(picture, side, fallback);
   return box;
 }
 
@@ -40,9 +45,10 @@ export function mountPeoplePanel(root: HTMLElement, currentUuid: () => string, o
     let token = readPending();
     if (!token) { token = newToken(); writePending(token); }
     section.innerHTML = `<h2>測量者與 Google 試算表</h2>
-      <div class="import"><h3>已經有試算表了：貼上設定碼</h3>
-        <p class="hint">在已經設定好的裝置（例如電腦上原本的網頁）按「顯示手機設定 QR 碼」，掃描或複製那段文字貼在這裡。換網址、換瀏覽器或換手機都用這個，不必重建試算表。</p>
-        <textarea data-field="code" rows="3" placeholder="RD545SETUP1:…"></textarea><button data-act="import">套用設定碼</button></div>
+      <div class="import"><h3>已經有試算表了：掃一下就好</h3>
+        <p class="hint">在已經設定好的裝置（例如電腦）按「傳送設定到手機（QR 碼）」，用這支手機的相機掃描、點連結就完成，不必重建試算表。</p>
+        <details><summary>沒辦法掃描？貼上文字設定碼</summary>
+        <textarea data-field="code" rows="3" placeholder="RD545SETUP1:…"></textarea><button data-act="import">套用設定碼</button></details></div>
       <details class="create"><summary>還沒有試算表：建立新的（第一次使用，約 5 分鐘）</summary>
       <p class="hint">量測紀錄會存在登入的 Google 帳號自己的試算表。每個人用自己的 Google 帳號建立，就各自存在自己的試算表。</p>
       <ol class="setup">
@@ -98,7 +104,7 @@ export function mountPeoplePanel(root: HTMLElement, currentUuid: () => string, o
         <label class="inline"><input name="體脂計本人" type="checkbox"> 這是體脂計裡設定的本人</label>
         <button type="submit">儲存人員</button></form></details>
       <div class="phone-setup"></div>
-      <div class="actions"><button class="secondary" data-act="phone">顯示手機設定 QR 碼</button><button class="secondary" data-act="refresh">重新整理名單</button><button class="quiet" data-act="forget">取消試算表設定</button></div>
+      <div class="actions"><button class="secondary" data-act="phone">傳送設定到手機（QR 碼）</button><button class="secondary" data-act="refresh">重新整理名單</button><button class="quiet" data-act="forget">取消試算表設定</button></div>
       <p role="status">${esc(message)}</p>`;
     const groupSelect = section.querySelector<HTMLSelectElement>('[data-field=group]')!, personSelect = section.querySelector<HTMLSelectElement>('[data-field=person]')!;
     groupSelect.onchange = () => { selectedId = people.find(p => p.群組 === groupSelect.value)?.id ?? null; saveSelectedPerson(selectedId); message = ''; render(); };

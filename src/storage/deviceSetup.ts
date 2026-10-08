@@ -27,6 +27,23 @@ export function decodeSetup(code: string): DeviceSetup {
   return { sheet: { url: data.u, token: data.t }, uuid: data.i };
 }
 
+/**
+ * Scan-to-set-up link. The code rides in the URL fragment, which browsers never send to the server,
+ * and the page strips it from the address bar as soon as it has been read.
+ */
+const publicSite = 'https://binnu1025.github.io/rd545-health/';
+export function setupLink(code: string, here: Location = location): string {
+  // A link to localhost would not open on the phone, so point at the published site instead.
+  const base = here.protocol === 'https:' ? here.origin + here.pathname : publicSite;
+  return `${base}#setup=${code}`;
+}
+export function takeSetupFromLink(here: Location = location, history: History = window.history): DeviceSetup | null {
+  if (!here.hash.startsWith('#setup=')) return null;
+  const code = decodeURIComponent(here.hash.slice('#setup='.length));
+  history.replaceState(null, '', here.pathname + here.search);
+  return decodeSetup(code);
+}
+
 /** Remembered only when the user imported a setup code on this device; the PC keeps the identity in memory only. */
 export function loadRememberedUuid(): string | null {
   try { const v = localStorage.getItem(identityKey); return v && uuidPattern.test(v) ? v : null; } catch { return null; }
