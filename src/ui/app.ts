@@ -3,7 +3,7 @@ import { observedServiceUuid } from '../bluetooth/autoReceive';
 import { identifyScale, type ScaleStage } from '../bluetooth/identityProbe';
 import { ageAt, type ScaleProfile } from '../bluetooth/userProfile';
 import { isSignedIn, NeedsSignIn, pickSpreadsheet, prepareGoogle, rememberedEmail, signedInEmail, signIn, signOut } from '../google/googleAuth';
-import { adopt, findOrCreate, findTagged, load, savePerson, saveRecords, saveSetting, spreadsheetUrl, untag, type Store } from '../google/sheetStore';
+import { adopt, findOrCreate, load, savePerson, saveRecords, saveSetting, spreadsheetUrl, untag, type Store } from '../google/sheetStore';
 import { fromRecord, loadSelectedPerson, saveSelectedPerson, toRecord, type Person } from '../storage/sheetClient';
 import { renderBodyComposition, type ReportProfile } from './bodyFigure';
 import { renderTrend } from './trendChart';
@@ -35,7 +35,7 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
   const section = document.createElement('section');
   section.className = 'card app';
   root.prepend(section);
-  let store: Store | null = null, choosing = false, needIdentity = false, uuid = '', selectedId = loadSelectedPerson(), message = '', busy = false;
+  let store: Store | null = null, needIdentity = false, uuid = '', selectedId = loadSelectedPerson(), message = '', busy = false;
   let scaleProfile: ScaleProfile | null = null, stage: string | null = null, fresh: HTMLElement | null = null;
   const people = () => store?.people ?? [];
   const selected = () => people().find(p => p.id === selectedId) ?? null;
@@ -45,16 +45,14 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
   const fail = (e: unknown) => { if (e instanceof NeedsSignIn) store = null; message = e instanceof Error ? e.message : String(e); };
   async function act(op: () => Promise<string | void>) { busy = true; render(); try { message = (await op()) || ''; } catch (e) { fail(e); } busy = false; render(); }
 
-  const choiceKey = (email: string) => `rd545.sheetChoice.${email}`;
   async function connectGoogle() {
     message = '正在登入 Google…'; busy = true; render();
     try {
       const email = await signIn();
       message = '正在開啟你的試算表…'; render();
-      const id = local.get(sheetIdKey(email)) || await findTagged();
-      if (id) await openSheet(id).catch(async () => { const tagged = await findTagged(); if (!tagged) throw Error('找不到你的試算表'); await openSheet(tagged); });
-      // First time on this account, or only the empty sheet created before the choice existed: ask once.
-      choosing = !store || (!local.get(choiceKey(email)) && !store.people.length && !store.records.length);
+      // A new account simply gets its own spreadsheet; switching to an existing one lives in 設定.
+      const id = local.get(sheetIdKey(email));
+      await (id ? openSheet(id) : Promise.reject()).catch(async () => openSheet(await findOrCreate()));
       message = '';
     } catch (e) { fail(e); }
     busy = false; render();
@@ -74,26 +72,17 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
     if (store.settings[identityKey]) uuid = store.settings[identityKey];
     else if (uuid) await saveSetting(store, identityKey, uuid);
   }
-  function chooseView() {
-    section.innerHTML = `<h2>你的試算表</h2>
-      <p class="hint">量測紀錄存在你 Google 帳號裡的試算表。之前已經有紀錄的話，選那一份，網頁就直接用它（原本的資料不會被更動）；第一次使用就建立新的。</p>
-      <button class="big" data-act="pick" ${busy ? 'disabled' : ''}>使用我原本的試算表</button>
-      <button class="secondary" data-act="new" ${busy ? 'disabled' : ''}>這是新帳號，建立新的試算表</button><p role="status">${esc(message)}</p>`;
-    on('pick', () => void act(async () => {
-      const picked = await pickSpreadsheet();
-      if (!picked) return '沒有選擇試算表。';
-      const previous = store?.spreadsheetId;
-      await adopt(picked);
-      if (previous && previous !== picked) await untag(previous);
-      await openSheet(picked);
-      local.set(choiceKey(signedInEmail()), 'existing'); choosing = false;
-      return `已改用你原本的試算表${previous && previous !== picked ? '。先前自動建立的空白試算表已不再使用，可自行從雲端硬碟刪除' : ''}。`;
-    }));
-    on('new', () => void act(async () => {
-      await openSheet(store?.spreadsheetId ?? await findOrCreate());
-      local.set(choiceKey(signedInEmail()), 'new'); choosing = false;
-    }));
+  /** Rarely needed: point this account at a spreadsheet it already had (e.g. from the earlier Apps Script version). */
+  async function useExistingSheet() {
+    const picked = await pickSpreadsheet();
+    if (!picked) return '沒有選擇試算表。';
+    const previous = store?.spreadsheetId;
+    await adopt(picked);
+    if (previous && previous !== picked) await untag(previous);
+    await openSheet(picked);
+    return `已改用選擇的試算表${previous && previous !== picked ? '。原本那份不再使用，可自行從雲端硬碟刪除' : ''}。`;
   }
+
 
   /** Connects and verifies the scale; `mode` decides whether to only read its profile, read stored results, or measure. */
   function useScale(mode: 'profile' | 'stored' | true, done: string) {
@@ -175,6 +164,7 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
       <details class="settings"><summary>設定</summary><div class="actions">
         <a class="button secondary" href="${spreadsheetUrl(store!.spreadsheetId)}" target="_blank" rel="noopener">開啟試算表</a>
         <button class="secondary" data-act="refresh">重新整理</button>
+        <button class="secondary" data-act="switch-sheet">改用其他試算表</button>
         <button class="quiet" data-act="signout">登出</button></div></details>`;
     section.querySelector<HTMLSelectElement>('[data-field=person]')?.addEventListener('change', e => { selectedId = (e.target as HTMLSelectElement).value; saveSelectedPerson(selectedId); fresh = null; message = ''; render(); });
     const toggle = (form: string) => () => { const f = section.querySelector<HTMLFormElement>(`[data-form=${form}]`)!; f.hidden = !f.hidden; };
@@ -190,6 +180,7 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
     on('sync', needsScale(() => void useScale('stored', '已同步體脂計的結果。')));
     on('profile', () => void useScale('profile', '已讀取體脂計資料。'));
     on('refresh', () => void act(async () => { store = await load(store!.spreadsheetId); await keepIdentity(); }));
+    on('switch-sheet', () => void act(useExistingSheet));
     on('signout', () => { signOut(); store = null; fresh = null; message = '已登出。'; render(); });
     // Result area: a fresh reading from this visit, otherwise the newest saved row; then the trend.
     const report = section.querySelector<HTMLElement>('.report')!;
@@ -242,8 +233,7 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
     return `<ol class="progress">${stages.map((s, i) => `<li class="${i < at ? 'done' : i === at ? 'now' : ''}">${s.label}</li>`).join('')}</ol>`;
   }
   function render() {
-    if (choosing && isSignedIn()) chooseView();
-    else if (!store || !isSignedIn()) signInView();
+    if (!store || !isSignedIn()) signInView();
     else homeView();
   }
   render();
