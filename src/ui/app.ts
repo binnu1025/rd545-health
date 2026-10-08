@@ -18,6 +18,7 @@ const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt
 const uuidPattern = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 const hasBluetooth = typeof navigator !== 'undefined' && !!navigator.bluetooth;
 const isIos = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const familyConsentKey = 'rd545.familyConsent';
 const scaleNamePrefix = 'TNT_BW', identityKey = '體脂計身分', deviceIdentityKey = 'rd545.identity';
 const sheetIdKey = (email: string) => `rd545.sheetId.${email}`;
 const local = { get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* visit-only */ } } };
@@ -96,18 +97,27 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
         await keepIdentity().catch(() => { /* saving is retried next time; measuring does not depend on it */ });
         if (probe.status !== 'Connected') await probe.connect([observedServiceUuid], scaleNamePrefix);
         if (!probe.characteristics.size) await probe.enumerate();
+        const person = selected(), family = mode === true && person && !isOwner(person) ? person : null;
         const text = await identifyScale(probe, uuid, mode, t => { message = t; render(); }, (result, when, profile) => {
           if (!result.detail) return;
           stage = 'save'; render();
           const view = document.createElement('div');
           const status = document.createElement('p'); status.className = 'save-status'; status.textContent = '正在存到你的試算表…';
-          const reportProfile: ReportProfile | null = profile && { sex: profile.sex, age: ageAt(profile.birthDate, result.measuredAt), heightCm: profile.heightCm };
-          view.append(status, renderBodyComposition(result.detail, when, reportProfile));
+          // A family member's result is judged with their own sex and age; the owner's with the scale's profile.
+          const reportProfile: ReportProfile | null = family ? personProfile(family, result.measuredAt)
+            : profile && { sex: profile.sex, age: ageAt(profile.birthDate, result.measuredAt), heightCm: profile.heightCm };
+          view.append(status, renderBodyComposition(result.detail, when, reportProfile, family ? '試算表人員資料' : '體脂計個人設定'));
           fresh = view;
-          const person = selected();
-          if (store && person && isOwner(person)) void saveRecords(store, [toRecord(person, result.measuredAt, result.detail)])
+          // The result carries the height the scale used: it must be the family member's, or the numbers are not theirs.
+          if (family && result.detail.heightCm !== null && Math.abs(result.detail.heightCm - Number(family.身高cm)) > 0.05) {
+            const warn = document.createElement('p'); warn.className = 'warn';
+            warn.textContent = `體脂計這次用的身高是 ${result.detail.heightCm} cm，與 ${family.姓名} 的 ${family.身高cm} cm 不同，數值可能不是用他的資料計算。請截圖回報。`;
+            view.prepend(warn);
+          }
+          if (store && person && (isOwner(person) || family)) void saveRecords(store, [toRecord(person, result.measuredAt, result.detail)])
             .then(n => { status.textContent = n ? `已存到你的試算表（${person.姓名}）。` : '這筆結果先前已存過，未重複寫入。'; render(); }, e => { status.textContent = `存檔失敗：${e instanceof Error ? e.message : e}`; });
-        }, { stage: s => { stage = s; render(); }, profile: p => { scaleProfile = p; } });
+        }, { stage: s => { stage = s; render(); }, profile: p => { scaleProfile = p; },
+          measureFor: family ? { name: family.姓名, birthDate: family.出生日期, sex: family.性別, heightCm: Number(family.身高cm) } : undefined });
         if (mode === 'profile') message = text; else message = fresh ? '' : text;
       } catch (e) { fail(e); throw e; }
       finally { busy = false; stage = null; render(); }
@@ -145,7 +155,7 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
 
   function homeView() {
     const person = selected(), groups = [...new Set(people().map(x => x.群組))], p = scaleProfile;
-    const canMeasure = isOwner(person);
+    const canMeasure = !!person && (isOwner(person) || complete(person));
     const picker = people().length
       ? `<label>量測者<select data-field="person">${groups.map(g => `<optgroup label="${esc(g)}">${people().filter(x => x.群組 === g).map(x =>
           `<option value="${esc(x.id)}" ${x.id === person?.id ? 'selected' : ''}>${esc(x.姓名)}${isOwner(x) ? '（本人）' : ''}</option>`).join('')}</optgroup>`).join('')}</select></label>
@@ -161,10 +171,10 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
       ${picker}
       ${people().length && !hasBluetooth ? noBluetoothBox() : ''}
       ${people().length && hasBluetooth ? `<button class="big measure" data-act="measure" ${busy || !canMeasure ? 'disabled' : ''}>開始量測</button>
-      ${!canMeasure && person ? `<p class="warn">${esc(person.姓名)} 的量測還不能用：體脂計目前只會用本人的身高、年齡、性別計算。替家人量測的功能開發中。</p>` : ''}
+      ${person && !isOwner(person) && canMeasure ? `<p class="hint">替 ${esc(person.姓名)} 量測時，會把他的生日、性別、身高暫時寫入體脂計，量完自動改回你的資料。</p>` : ''}
       ${canMeasure && !busy ? '<p class="hint">先輕踩一下體脂計，讓螢幕亮起來（體脂計休眠時藍牙找不到它），再按「開始量測」。</p>' : ''}
       ${needIdentity && !uuid ? identityBox() : ''}${progress()}<p role="status">${esc(message)}</p>
-      ${canMeasure ? `<button class="link" data-act="sync" ${busy ? 'disabled' : ''}>已經在體脂計上量過了？只同步結果</button>` : ''}` : `${progress()}<p role="status">${esc(message)}</p>`}
+      ${isOwner(person) ? `<button class="link" data-act="sync" ${busy ? 'disabled' : ''}>已經在體脂計上量過了？只同步結果</button>` : ''}` : `${progress()}<p role="status">${esc(message)}</p>`}
       <div class="report"></div>
       <details class="settings"><summary>設定</summary><div class="actions">
         <a class="button secondary" href="${spreadsheetUrl(store!.spreadsheetId)}" target="_blank" rel="noopener">開啟試算表</a>
@@ -181,7 +191,13 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
     bindIdentityBox();
     // The scale is only needed when measuring; without an identity yet, ask for it right here.
     const needsScale = (go: () => void) => () => { if (!uuid) { needIdentity = true; message = ''; render(); return; } go(); };
-    on('measure', needsScale(() => void useScale(true, '量測完成。')));
+    on('measure', needsScale(() => {
+      if (person && !isOwner(person) && local.get(familyConsentKey) !== '1') {
+        if (!confirm(`替 ${person.姓名} 量測時，會把他的生日、性別、身高暫時寫入體脂計，量完自動改回你的資料。要繼續嗎？`)) return;
+        local.set(familyConsentKey, '1');
+      }
+      void useScale(true, '量測完成。');
+    }));
     on('sync', needsScale(() => void useScale('stored', '已同步體脂計的結果。')));
     on('profile', () => void useScale('profile', '已讀取體脂計資料。'));
     on('refresh', () => void act(async () => { store = await load(store!.spreadsheetId); await keepIdentity(); }));
@@ -208,6 +224,11 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
     }
     if (person) report.append(renderTrend(store!.records, person), manageRecords(person));
     on('copy-link', () => void navigator.clipboard.writeText(location.origin + location.pathname).then(() => { message = '網址已複製，請到 Bluefy 貼上開啟。'; render(); }, () => { message = `請手動複製網址：${location.origin + location.pathname}`; render(); }));
+  }
+
+  function personProfile(p: Person, at: Date): ReportProfile | null {
+    const birth = new Date(`${p.出生日期}T00:00:00Z`), height = Number(p.身高cm);
+    return isNaN(+birth) || !height ? null : { sex: p.性別, age: ageAt(birth, at), heightCm: height };
   }
 
   /** iPhone/iPad browsers (all WebKit) have no Web Bluetooth; viewing works, measuring needs a Bluetooth-capable browser. */
