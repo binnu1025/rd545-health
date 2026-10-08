@@ -10,7 +10,7 @@ export interface ReportInput {
   previous?: BodyComposition | null; goals?: Goals;
 }
 
-const W = 1240, H = 1866;
+const W = 1240, H = 1668;
 const font = `'Noto Sans TC','Microsoft JhengHei','PingFang TC','Heiti TC',sans-serif`;
 const ink = '#183d38', muted = '#5d7a70', line = '#dce7e1', brand = '#0b5b4b';
 const stateColor = { low: '#4f7fa3', normal: '#1e7a5d', high: '#b5651d', plain: '#2f4f47' };
@@ -98,7 +98,7 @@ export function buildReportSvg(input: ReportInput, scale = 1): string {
   out += `<text x="56" y="${y + 40}" font-size="${nameSize}" font-weight="800" fill="${ink}">${xml(input.name)}</text>`;
   out += info.map(([k, v], i) => `<text x="${60 + nameW + i * colW}" y="${y + 4}" font-size="15" fill="${muted}">${k}</text><text x="${60 + nameW + i * colW}" y="${y + 36}" font-size="${k === '量測時間' ? 20 : 25}" font-weight="700" fill="${ink}">${xml(v)}</text>`).join('');
   y += 76;
-  for (const [title, labels] of [['肌肉脂肪分析', ['體重', '肌肉量', '四肢肌肉指數', '骨量']], ['肥胖分析', ['BMI', '體脂率', '內臟脂肪']], ['其他指標', ['體水分率', '肌肉品質', '基礎代謝', '代謝年齡', '肌肉評分']]] as const) {
+  for (const [title, labels] of [['肌肉脂肪分析', ['體重', '四肢肌肉指數']], ['肥胖分析', ['BMI', '體脂率', '內臟脂肪']], ['其他指標', ['體水分率', '肌肉品質', '代謝年齡', '肌肉評分']]] as const) {
     out += section(y, title); y += 52;
     const b = bars(pick(...labels), y); out += b.svg; y += b.height + 8;
   }
@@ -123,7 +123,7 @@ export function buildReportSvg(input: ReportInput, scale = 1): string {
 }
 
 /**
- * Renders the report as a 3100×4665 PNG and downloads the original file. PNG is lossless, so text and lines
+ * Renders the report as a 3100×4170 PNG and downloads the original file. PNG is lossless, so text and lines
  * stay sharp; downloading (instead of a share sheet) avoids chat apps shrinking the image. The SVG is sized
  * at the output resolution so the browser draws vectors at full size; 2.5× stays under iPhone's
  * 16.7-megapixel canvas limit.
