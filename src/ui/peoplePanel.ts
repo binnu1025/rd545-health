@@ -23,11 +23,13 @@ function renderSetupQr(code: string): HTMLElement {
 }
 
 export interface PeoplePanel {
+  /** Selected person's most recent saved row, if any. */
+  latest(): { person: Person; record: SheetRecord } | null;
   /** Text for the result area: saved / duplicate / why it was not saved. */
   saveResult(measuredAt: Date, detail: BodyComposition): Promise<string>;
 }
 
-export function mountPeoplePanel(root: HTMLElement, currentUuid: () => string): PeoplePanel {
+export function mountPeoplePanel(root: HTMLElement, currentUuid: () => string, onChange: () => void = () => {}): PeoplePanel {
   const section = document.createElement('section');
   section.className = 'card people';
   root.prepend(section);
@@ -126,7 +128,7 @@ export function mountPeoplePanel(root: HTMLElement, currentUuid: () => string): 
     if (person) section.append(renderTrend(records, person));
   }
 
-  function render() { if (config) connectedView(); else setupView(); }
+  function render() { if (config) connectedView(); else setupView(); onChange(); }
   async function refresh() {
     if (!config) return render();
     try { ({ people, records } = await listAll(config)); message = ''; } catch (e) { message = `無法讀取名單：${e instanceof Error ? e.message : e}`; }
@@ -136,6 +138,12 @@ export function mountPeoplePanel(root: HTMLElement, currentUuid: () => string): 
   void refresh();
 
   return {
+    latest() {
+      const person = selected();
+      if (!person) return null;
+      const rows = records.filter(r => r['人員id'] === person.id).sort((a, b) => +new Date(String(a['量測時間'])) - +new Date(String(b['量測時間'])));
+      return rows.length ? { person, record: rows[rows.length - 1] } : null;
+    },
     async saveResult(measuredAt, detail) {
       if (!config) return '尚未設定 Google 試算表，這次結果沒有存檔。';
       const person = selected();

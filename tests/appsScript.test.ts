@@ -51,3 +51,11 @@ it('fills every sheet column from a measurement (no misspelled keys)', () => {
   const record = toRecord({ id: 'x', 群組: 'g', 姓名: 'n', 性別: 'male', 出生日期: '', 身高cm: '', 體脂計本人: 'true' }, new Date(), detail);
   expect(Object.keys(record).sort()).toEqual(recordHeaders.filter(h => h !== '寫入時間').sort());
 });
+it('rebuilds a saved row into the same body composition for the report', async () => {
+  const { fromRecord } = await import('../src/storage/sheetClient');
+  const at = new Date('2026-02-03T04:05:06Z');
+  const back = fromRecord(toRecord({ id: 'x', 群組: 'g', 姓名: 'n', 性別: 'male', 出生日期: '', 身高cm: '', 體脂計本人: 'true' }, at, detail))!;
+  expect(back.measuredAt.toISOString()).toBe(at.toISOString());
+  expect(back.detail).toEqual({ ...detail, segments: { ...detail.segments, trunk: { ...detail.segments.trunk, muscleQuality: null } } });
+  expect(fromRecord({ 量測時間: 'not a date' })).toBeNull();
+});

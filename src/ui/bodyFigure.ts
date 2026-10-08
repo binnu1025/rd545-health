@@ -53,7 +53,7 @@ function wholeBodyBars(d: BodyComposition, profile: ReportProfile | null): BarIt
   ];
 }
 
-export function renderBodyComposition(detail: BodyComposition, measuredAtText: string, profile: ReportProfile | null = null): HTMLElement {
+export function renderBodyComposition(detail: BodyComposition, measuredAtText: string, profile: ReportProfile | null = null, profileSource = '體脂計個人設定'): HTMLElement {
   const root = document.createElement('section');
   root.className = 'body-report';
   const keys = Object.keys(shapes) as SegmentKey[];
@@ -63,7 +63,7 @@ export function renderBodyComposition(detail: BodyComposition, measuredAtText: s
     ${keys.map(k => segmentLabel(k, detail.segments[k])).join('')}
   </svg>`;
   const segmentRows = keys.map(k => { const s = detail.segments[k]; return `<tr><th>${labels[k].name}</th><td>${fmt(s.muscleKg, 2)} kg</td><td>${fmt(s.fatPct)} %</td><td class="${scoreClass(s.muscleScore)}">${signed(s.muscleScore)}</td><td>${fmt(s.muscleQuality, 0)}</td></tr>`; }).join('');
-  const who = profile ? `${profile.sex === 'male' ? '男' : '女'}・${profile.age} 歲・${fmt(profile.heightCm)} cm（體脂計個人設定）` : '未取得體脂計個人設定，僅能判定 BMI、體重與內臟脂肪';
+  const who = profile ? `${profile.sex === 'male' ? '男' : '女'}・${profile.age} 歲・${fmt(profile.heightCm)} cm（${profileSource}）` : '未取得體脂計個人設定，僅能判定 BMI、體重與內臟脂肪';
   root.innerHTML = `<h3>身體組成　<small>${measuredAtText}（台北時間）</small></h3><p class="hint who">${who}</p>
     <h4>肌肉脂肪分析</h4><div class="bars-host"></div>
     <h4>部位分析</h4>

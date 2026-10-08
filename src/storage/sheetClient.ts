@@ -36,6 +36,19 @@ export const listAll = (c: SheetConfig) => call<{ people: Person[]; records: She
 export const savePerson = (c: SheetConfig, person: Partial<Person>) => call<{ person: Person }>(c, 'savePerson', { person });
 export const saveRecord = (c: SheetConfig, record: SheetRecord) => call<{ duplicate: boolean }>(c, 'saveRecord', { record });
 
+/** Rebuilds a saved row for the report, so the latest result shows without touching the scale. */
+export function fromRecord(r: SheetRecord): { measuredAt: Date; detail: BodyComposition } | null {
+  const at = new Date(String(r['量測時間'] ?? ''));
+  if (isNaN(+at)) return null;
+  const n = (key: string) => { const v = r[key]; return typeof v === 'number' && isFinite(v) ? v : null; };
+  const seg = (name: string, quality = true) => ({ muscleKg: n(`${name}肌肉kg`), fatPct: n(`${name}體脂%`), muscleScore: n(`${name}肌肉評分`), muscleQuality: quality ? n(`${name}肌肉品質`) : null });
+  return { measuredAt: at, detail: {
+    heightCm: n('身高cm'), weightKg: n('體重kg'), bmi: n('BMI'), bodyFatPct: n('體脂率%'), muscleMassKg: n('肌肉量kg'), muscleScore: n('肌肉評分'),
+    boneMassKg: n('骨量kg'), bmrKcal: n('基礎代謝kcal'), metabolicAge: n('代謝年齡'), visceralFat: n('內臟脂肪'), bodyWaterPct: n('體水分率%'), muscleQuality: n('肌肉品質'),
+    segments: { rightArm: seg('右手'), leftArm: seg('左手'), trunk: seg('軀幹', false), rightLeg: seg('右腳'), leftLeg: seg('左腳') },
+  } };
+}
+
 /** One spreadsheet row per measurement; the key makes re-reading the same stored result a no-op. */
 export function toRecord(person: Person, measuredAt: Date, d: BodyComposition): SheetRecord {
   const s = d.segments;
