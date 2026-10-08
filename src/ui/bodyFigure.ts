@@ -10,9 +10,10 @@ const scoreClass = (value: number | null) => value === null ? 'unknown' : value 
 
 export interface ReportProfile { sex: Sex; age: number; heightCm: number }
 
-export function wholeBodyBars(d: BodyComposition, profile: ReportProfile | null): BarItem[] {
+export interface Goals { weightKg?: number | null; bodyFatPct?: number | null }
+export function wholeBodyBars(d: BodyComposition, profile: ReportProfile | null, previous: BodyComposition | null = null, goals: Goals = {}): BarItem[] {
   const height = profile?.heightCm ?? d.heightCm;
-  return [
+  const items: BarItem[] = [
     { label: '體重', unit: 'kg', value: d.weightKg, digits: 1, range: height ? weightRange(height) : null },
     { label: 'BMI', unit: 'kg/m²', value: d.bmi, digits: 1, range: bmiRange() },
     { label: '體脂率', unit: '%', value: d.bodyFatPct, digits: 1, range: profile ? bodyFatRange(profile.sex) : null, note: '需性別才能判定' },
@@ -26,9 +27,19 @@ export function wholeBodyBars(d: BodyComposition, profile: ReportProfile | null)
     { label: '骨量', unit: 'kg', value: d.boneMassKg, digits: 1 },
     { label: '基礎代謝', unit: 'kcal', value: d.bmrKcal, digits: 0 },
   ];
+  if (previous) {
+    const before: Record<string, number | null> = { 體重: previous.weightKg, BMI: previous.bmi, 體脂率: previous.bodyFatPct, 內臟脂肪: previous.visceralFat, 體水分率: previous.bodyWaterPct,
+      肌肉品質: previous.muscleQuality, 代謝年齡: previous.metabolicAge, 肌肉量: previous.muscleMassKg, 肌肉評分: previous.muscleScore, 骨量: previous.boneMassKg, 基礎代謝: previous.bmrKcal };
+    for (const item of items) item.previous = before[item.label] ?? null;
+  }
+  for (const item of items) {
+    if (item.label === '體重') item.goal = goals.weightKg ?? null;
+    if (item.label === '體脂率') item.goal = goals.bodyFatPct ?? null;
+  }
+  return items;
 }
 
-export function renderBodyComposition(detail: BodyComposition, measuredAtText: string, profile: ReportProfile | null = null, profileSource = '體脂計個人設定'): HTMLElement {
+export function renderBodyComposition(detail: BodyComposition, measuredAtText: string, profile: ReportProfile | null = null, profileSource = '體脂計個人設定', extra: { previous?: BodyComposition | null; goals?: Goals } = {}): HTMLElement {
   const root = document.createElement('section');
   root.className = 'body-report';
   const keys = Object.keys(segmentNames) as SegmentKey[];
@@ -40,6 +51,6 @@ export function renderBodyComposition(detail: BodyComposition, measuredAtText: s
     <div class="figures"><figure><figcaption>部位肌肉量</figcaption>${figureSvg(detail.segments, { mode: 'muscle' })}<p class="legend">${figureLegend('muscle')}</p></figure>
       <figure><figcaption>部位體脂率</figcaption>${figureSvg(detail.segments, { mode: 'fat' })}<p class="legend">${figureLegend('fat')}</p></figure></div>
     <table class="segments"><thead><tr><th>部位</th><th>肌肉量</th><th>體脂率</th><th>肌肉評分</th><th>肌肉品質</th></tr></thead><tbody>${segmentRows}</tbody></table>`;
-  root.querySelector('.bars-host')!.replaceWith(renderBars(wholeBodyBars(detail, profile)));
+  root.querySelector('.bars-host')!.replaceWith(renderBars(wholeBodyBars(detail, profile, extra.previous ?? null, extra.goals)));
   return root;
 }

@@ -41,7 +41,7 @@ function ageOn(birth: string, at: Date) {
 }
 const signed = (v: number, digits: number) => `${v > 0 ? '+' : v < 0 ? '−' : '±'}${Math.abs(v).toFixed(digits)}`;
 
-export function renderTrend(all: SheetRecord[], person: Person): HTMLElement {
+export function renderTrend(all: SheetRecord[], person: Person, goals: { weightKg?: number | null; bodyFatPct?: number | null } = {}): HTMLElement {
   const root = document.createElement('div');
   root.className = 'trend';
   const rows = all.filter(r => r['人員id'] === person.id && r['量測時間'])
@@ -68,6 +68,7 @@ export function renderTrend(all: SheetRecord[], person: Person): HTMLElement {
     if (!points.length) { const p = document.createElement('p'); p.className = 'hint'; p.textContent = '這個項目還沒有數據。'; body.append(p); return; }
     const last = points[points.length - 1], age = ageOn(person.出生日期, last.at), height = Number(person.身高cm);
     const range = metric.range && age !== null && height ? metric.range({ sex: person.性別, age, heightCm: height }) : null;
+    const goal = metric.key === '體重kg' ? goals.weightKg ?? null : metric.key === '體脂率%' ? goals.bodyFatPct ?? null : null;
 
     // Headline figures: latest, change since previous, change since first.
     const stats = document.createElement('div'); stats.className = 'trend-stats';
@@ -77,13 +78,14 @@ export function renderTrend(all: SheetRecord[], person: Person): HTMLElement {
       stat('與上次相比', `${signed(last.v - points[points.length - 2].v, metric.digits)} ${metric.unit}`);
       stat(`與第一次相比（${taipeiDate(points[0].at)}）`, `${signed(last.v - points[0].v, metric.digits)} ${metric.unit}`);
     }
+    if (goal !== null) { const d = last.v - goal; stat('目標', `${goal.toFixed(metric.digits)} ${metric.unit}`, Math.abs(d) < 10 ** -metric.digits / 2 ? '已達成' : `還差 ${Math.abs(d).toFixed(metric.digits)} ${metric.unit}`); }
     if (range) stat('正常範圍', `${range.low}–${range.high} ${metric.unit}`, range.source);
     body.append(stats);
 
     // Scales: time on x (real gaps between measurements), value on y including the normal band.
     const t0 = +points[0].at, t1 = +last.at, span = t1 - t0 || 86400000;
     const xs = (t: number) => points.length === 1 ? (M.left + W - M.right) / 2 : M.left + (t - t0) / span * (W - M.left - M.right);
-    const values = points.map(p => p.v).concat(range ? [range.low, range.high] : []);
+    const values = points.map(p => p.v).concat(range ? [range.low, range.high] : [], goal !== null ? [goal] : []);
     let lo = Math.min(...values), hi = Math.max(...values); const pad = (hi - lo || Math.abs(hi) * 0.1 || 1) * 0.15; lo -= pad; hi += pad;
     const ticks = niceTicks(lo, hi); lo = Math.min(lo, ticks[0]); hi = Math.max(hi, ticks[ticks.length - 1]);
     const ys = (v: number) => M.top + (hi - v) / (hi - lo) * (H - M.top - M.bottom);
@@ -98,6 +100,10 @@ export function renderTrend(all: SheetRecord[], person: Person): HTMLElement {
       const top = ys(Math.min(range.high, hi)), bottom = ys(Math.max(range.low, lo));
       svg.append(el('rect', { x: M.left, y: top, width: W - M.left - M.right, height: Math.max(0, bottom - top), class: 'normal-band' }));
       const tag = el('text', { x: W - M.right + 6, y: top + 12, class: 'axis band-label' }); tag.textContent = '正常範圍'; svg.append(tag);
+    }
+    if (goal !== null) {
+      svg.append(el('line', { x1: M.left, x2: W - M.right, y1: ys(goal), y2: ys(goal), class: 'goal-line' }));
+      const g = el('text', { x: W - M.right + 6, y: ys(goal) + 4, class: 'axis goal-label' }); g.textContent = `目標 ${goal}`; svg.append(g);
     }
     // X labels: first, last, and a few in between that do not collide.
     const xLabels: number[] = []; points.forEach((p, i) => { const x = xs(+p.at); if (i === 0 || i === points.length - 1 || xLabels.every(o => Math.abs(o - x) > 60)) xLabels.push(x); });

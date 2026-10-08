@@ -8,6 +8,10 @@ export interface BarItem {
   /** Reference point drawn on the bar without a normal band (e.g. actual age for metabolic age). */
   marker?: { value: number; label: string; describe: (diff: number) => string };
   note?: string;
+  /** Same value at the previous measurement, for a "比上次" change. */
+  previous?: number | null;
+  /** The person's own goal for this value (weight, body fat). */
+  goal?: number | null;
 }
 
 /** Everything needed to draw one bar, in percent of the track width; shared by the page and the JPG report. */
@@ -19,6 +23,9 @@ export interface BarModel {
   fillFrom: number; fillWidth: number;
   state: 'low' | 'normal' | 'high' | 'plain';
   verdict: string; gap: string;
+  /** "比上次 ▼0.8 kg" or '' when there is no previous value. */
+  change: string;
+  goalAt: number | null; goalText: string;
 }
 
 export const fmt = (v: number, digits: number) => v.toFixed(digits);
@@ -28,7 +35,9 @@ function axisFor(item: BarItem, value: number): [number, number] {
   const { range, marker } = item;
   let min: number, max: number;
   if (range) { const span = range.high - range.low; min = Math.max(0, range.low - span * 0.7); max = range.high + span * 1.3; }
-  else { const ref = Math.max(value, marker?.value ?? 0); min = 0; max = ref * 1.35 || 1; }
+  else { const ref = Math.max(value, marker?.value ?? 0, item.goal ?? 0); min = 0; max = ref * 1.35 || 1; }
+  // Keep the goal on the track too.
+  if (item.goal != null) { if (item.goal > max) max = item.goal + (max - min) * 0.12; if (item.goal < min) min = Math.max(0, item.goal - (max - min) * 0.12); }
   // Keep the value visibly inside the track.
   if (value > max) max = value + (max - min) * 0.12;
   if (value < min) min = Math.max(0, value - (max - min) * 0.12);
@@ -41,7 +50,13 @@ export function barModel(item: BarItem): BarModel | null {
   // On a signed scale (e.g. −4…+4) the bar grows from zero, not from the axis minimum.
   const zero = min < 0 && max > 0 ? pos(0) : 0;
   const model: BarModel = { item, value, zones: null, ticks: [], markerAt: null, zeroAt: zero || null,
-    fillFrom: Math.min(zero, pos(value)), fillWidth: Math.abs(pos(value) - zero), state: 'plain', verdict: item.note ?? '無公開標準', gap: '' };
+    fillFrom: Math.min(zero, pos(value)), fillWidth: Math.abs(pos(value) - zero), state: 'plain', verdict: item.note ?? '無公開標準', gap: '',
+    change: changeText(item, value), goalAt: null, goalText: '' };
+  if (item.goal != null) {
+    model.goalAt = pos(item.goal);
+    const d = value - item.goal;
+    model.goalText = Math.abs(d) < 10 ** -item.digits / 2 ? '已達成目標' : `距目標 ${d > 0 ? '−' : '+'}${fmt(Math.abs(d), item.digits)} ${item.unit}`;
+  }
   if (zero) model.ticks.push({ at: zero, label: '0' });
   if (item.range) {
     const r = item.range, j = judge(value, r);
@@ -59,15 +74,24 @@ export function barModel(item: BarItem): BarModel | null {
   return model;
 }
 
+/** Direction and size of the change since last time; no judgement, since down is not always better. */
+function changeText(item: BarItem, value: number): string {
+  if (item.previous == null) return '';
+  const d = value - item.previous, step = 10 ** -item.digits;
+  if (Math.abs(d) < step / 2) return '與上次相同';
+  return `比上次 ${d > 0 ? '▲' : '▼'}${fmt(Math.abs(d), item.digits)} ${item.unit}`;
+}
+
 function row(item: BarItem): string {
   const m = barModel(item);
   if (!m) return `<div class="bar-row"><div class="bar-label">${item.label}<small>${item.unit}</small></div><div class="bar-track empty"></div><div class="bar-result">—<small>無資料</small></div></div>`;
   const zones = m.zones ? `<i class="zone low" style="width:${m.zones.low}%"></i><i class="zone normal" style="left:${m.zones.low}%;width:${m.zones.high - m.zones.low}%"></i><i class="zone high" style="left:${m.zones.high}%;width:${100 - m.zones.high}%"></i>` : '';
-  const lines = (m.markerAt !== null ? `<i class="marker-line" style="left:${m.markerAt}%"></i>` : '') + (m.zeroAt ? `<i class="marker-line zero" style="left:${m.zeroAt}%"></i>` : '');
+  const lines = (m.markerAt !== null ? `<i class="marker-line" style="left:${m.markerAt}%"></i>` : '') + (m.zeroAt ? `<i class="marker-line zero" style="left:${m.zeroAt}%"></i>` : '')
+    + (m.goalAt !== null ? `<i class="marker-line goal" style="left:${m.goalAt}%"></i><span class="tick goal" style="left:${m.goalAt}%">目標 ${fmt(item.goal!, item.digits)}</span>` : '');
   const ticks = m.ticks.map(t => `<span class="tick${t.strong ? ' marker' : ''}" style="left:${t.at}%">${t.label}</span>`).join('');
   return `<div class="bar-row ${m.state}"><div class="bar-label">${item.label}<small>${item.unit}</small></div>
     <div class="bar-track">${zones}${lines}<b class="bar-fill" style="left:${m.fillFrom}%;width:${m.fillWidth}%"></b>${ticks}</div>
-    <div class="bar-result"><strong>${fmt(m.value, item.digits)}</strong><span class="verdict">${m.verdict}</span>${m.gap ? `<small>${m.gap}</small>` : ''}</div></div>`;
+    <div class="bar-result"><strong>${fmt(m.value, item.digits)}</strong><span class="verdict">${m.verdict}</span>${m.gap ? `<small>${m.gap}</small>` : ''}${m.goalText ? `<small class="goal-text">${m.goalText}</small>` : ''}${m.change ? `<small class="delta">${m.change}</small>` : ''}</div></div>`;
 }
 
 export function renderBars(items: BarItem[]): HTMLElement {

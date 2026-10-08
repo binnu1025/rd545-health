@@ -128,3 +128,14 @@ it('deletes one measurement row and moves another to a different person', async 
   expect(row[recordHeaders.indexOf('體重kg')]).toBe(70);                                // measured values untouched
   await expect(deleteRecord(store, 'missing', g.api)).rejects.toThrow('找不到');
 });
+it('appends new 人員 columns to an older sheet without touching its rows', async () => {
+  const g = fakeGoogle(true);
+  const oldHead = ['id', '群組', '姓名', '性別', '出生日期', '身高cm', '體脂計本人', '建立時間'];
+  const person = ['p1', '家人', '我', 'male', '1990-01-01', '174', 'true', ''];
+  g.tabs.set('人員', [oldHead, person]);
+  g.tabs.set('量測紀錄', [[...recordHeaders]]); g.tabs.set('設定', [['項目', '值']]);
+  const store = await load('s1', g.api);
+  expect(g.tabs.get('人員')![0]).toEqual([...oldHead, '目標體重kg', '目標體脂率%']);
+  expect(g.tabs.get('人員')![1]).toEqual(person);
+  expect(store.people[0].姓名).toBe('我');
+});

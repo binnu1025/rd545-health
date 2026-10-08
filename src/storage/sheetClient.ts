@@ -1,7 +1,7 @@
 import type { BodyComposition } from '../bluetooth/bodyComposition';
 
 /** Shared row types, the row <-> body-composition mapping, and this device's selected person. */
-export interface Person { id: string; 群組: string; 姓名: string; 性別: 'male' | 'female'; 出生日期: string; 身高cm: string; 體脂計本人: string; 建立時間?: string }
+export interface Person { id: string; 群組: string; 姓名: string; 性別: 'male' | 'female'; 出生日期: string; 身高cm: string; 體脂計本人: string; 建立時間?: string; 目標體重kg?: string; '目標體脂率%'?: string }
 export type SheetRecord = Record<string, string | number | null>;
 
 const selectedKey = 'rd545.selectedPerson';

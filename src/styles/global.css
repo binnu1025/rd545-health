@@ -14,3 +14,7 @@ a.button{display:inline-flex;align-items:center;justify-content:center;min-heigh
 .person-actions{display:flex;gap:18px;flex-wrap:wrap}
 .version{font-size:11px;color:#8aa298;font-family:Consolas,monospace;letter-spacing:.5px;white-space:nowrap;cursor:help}
 .manage{margin-top:14px;border-top:1px solid #dce7e1;padding-top:10px}.manage summary{cursor:pointer;font-weight:650;font-size:14px;color:#245e4c}.record-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid #eef3f0;font-size:14px}.record-row span{flex:1 1 220px;font-variant-numeric:tabular-nums}.record-row .quiet{min-height:34px;padding:4px 10px}.record-row .move-to{width:auto;margin:0;padding:6px 8px;font-size:13px}.no-bt{margin-top:12px}
+
+.marker-line.goal{background:#0b5b4b;width:3px;top:-5px;bottom:-5px}.bar-result .goal-text{color:#0b5b4b;font-weight:650}.bar-result .delta{color:#5d7a70}.trend-chart .goal-line{stroke:#0b5b4b;stroke-width:1.5}.trend-chart .goal-label{fill:#0b5b4b;font-weight:700}
+.tick.goal{top:-17px;color:#0b5b4b;font-weight:700}
+.bar-row:has(.tick.goal){padding-top:24px}

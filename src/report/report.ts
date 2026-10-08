@@ -1,12 +1,13 @@
 import type { BodyComposition } from '../bluetooth/bodyComposition';
 import { barModel, fmt, type BarItem } from '../ui/bodyBars';
-import { wholeBodyBars, type ReportProfile } from '../ui/bodyFigure';
+import { wholeBodyBars, type Goals, type ReportProfile } from '../ui/bodyFigure';
 import { figureSvg } from '../ui/figure';
 
 /** One-page, InBody-style report drawn as a single SVG, then rasterised to JPG for saving or sharing. */
 export interface ReportInput {
   name: string; profile: ReportProfile | null; measuredAt: Date; detail: BodyComposition;
   history: { at: Date; weight: number | null; fat: number | null; muscle: number | null }[];
+  previous?: BodyComposition | null; goals?: Goals;
 }
 
 const W = 1240, H = 1754;
@@ -35,13 +36,15 @@ function bars(items: BarItem[], y: number): { svg: string; height: number } {
     const zones = m.zones ? `<rect x="${trackX}" y="${top + 12}" width="${trackW * m.zones.low / 100}" height="18" fill="#eef1f0"/>`
       + `<rect x="${px(m.zones.low)}" y="${top + 12}" width="${trackW * (m.zones.high - m.zones.low) / 100}" height="18" fill="#cfe6da"/>`
       + `<rect x="${px(m.zones.high)}" y="${top + 12}" width="${trackW * (100 - m.zones.high) / 100}" height="18" fill="#f6e7d6"/>` : '';
-    const lines = [m.markerAt, m.zeroAt].filter((v): v is number => v !== null).map(at => `<rect x="${px(at) - 1}" y="${top + 8}" width="2" height="26" fill="${ink}" opacity="0.7"/>`).join('');
+    const lines = [m.markerAt, m.zeroAt].filter((v): v is number => v !== null).map(at => `<rect x="${px(at) - 1}" y="${top + 8}" width="2" height="26" fill="${ink}" opacity="0.7"/>`).join('')
+      + (m.goalAt !== null ? `<rect x="${px(m.goalAt) - 1.5}" y="${top + 6}" width="3" height="30" fill="${brand}"/><text x="${px(m.goalAt)}" y="${top + 2}" text-anchor="middle" font-size="13" font-weight="700" fill="${brand}">目標 ${fmt(item.goal!, item.digits)}</text>` : '');
     const ticks = m.ticks.map(t => `<text x="${px(t.at)}" y="${top + 50}" text-anchor="middle" font-size="13" fill="${t.strong ? ink : muted}" font-weight="${t.strong ? 700 : 400}">${xml(t.label)}</text>`).join('');
     const fill = `<rect x="${px(m.fillFrom)}" y="${top + 17}" width="${Math.max(3, trackW * m.fillWidth / 100)}" height="8" rx="4" fill="${stateColor[m.state]}"/>`;
     const [pillBg, pillInk] = pillColor[m.state], verdictW = 22 + m.verdict.length * 15;
     const result = `<text x="880" y="${top + 30}" font-size="26" font-weight="700" fill="${ink}">${fmt(m.value, item.digits)}</text>`
       + `<rect x="${980}" y="${top + 9}" width="${verdictW}" height="26" rx="13" fill="${pillBg}"/><text x="${980 + verdictW / 2}" y="${top + 27}" text-anchor="middle" font-size="14" font-weight="700" fill="${pillInk}">${xml(m.verdict)}</text>`
-      + (m.gap ? `<text x="880" y="${top + 54}" font-size="14" fill="${muted}">${xml(m.gap)}</text>` : '');
+      + (m.gap || m.goalText ? `<text x="880" y="${top + 54}" font-size="14" fill="${muted}">${xml([m.gap, m.goalText].filter(Boolean).join('・'))}</text>` : '')
+      + (m.change ? `<text x="${990 + verdictW}" y="${top + 27}" font-size="14" fill="${muted}">${xml(m.change)}</text>` : '');
     return `${label}<rect x="${trackX}" y="${top + 12}" width="${trackW}" height="18" rx="3" fill="#f4f7f5"/>${zones}${lines}${fill}${ticks}${result}<line x1="60" x2="${W - 60}" y1="${top + rowH - 2}" y2="${top + rowH - 2}" stroke="#eef3f0"/>`;
   }).join('');
   return { svg, height: items.length * rowH };
@@ -49,7 +52,7 @@ function bars(items: BarItem[], y: number): { svg: string; height: number } {
 
 export function buildReportSvg(input: ReportInput, scale = 1): string {
   const { detail: d, profile } = input;
-  const all = wholeBodyBars(d, profile);
+  const all = wholeBodyBars(d, profile, input.previous ?? null, input.goals ?? {});
   const pick = (...labels: string[]) => labels.map(l => all.find(b => b.label === l)!).filter(Boolean);
   const info: [string, string][] = [
     ['姓名', input.name], ['性別', profile ? (profile.sex === 'male' ? '男' : '女') : '—'], ['年齡', profile ? `${profile.age} 歲` : '—'],

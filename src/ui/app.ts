@@ -38,12 +38,12 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
   const section = document.createElement('section');
   section.className = 'card app';
   root.prepend(section);
-  let store: Store | null = null, needIdentity = false, askFamilyConsent = false, uuid = '', selectedId = loadSelectedPerson(), message = '', busy = false;
+  let store: Store | null = null, offline = false, offlineSavedAt = '', needIdentity = false, askFamilyConsent = false, uuid = '', selectedId = loadSelectedPerson(), message = '', busy = false;
   let scaleProfile: ScaleProfile | null = null, stage: string | null = null, fresh: HTMLElement | null = null;
   const people = () => store?.people ?? [];
   const selected = () => people().find(p => p.id === selectedId) ?? null;
   const owner = () => people().find(isOwner) ?? null;
-  void prepareGoogle().catch(() => { /* reported when the button is pressed */ });
+  void prepareGoogle().catch(() => { if (!isSignedIn() && useOfflineCopy()) render(); });
 
   const fail = (e: unknown) => { if (e instanceof NeedsSignIn) store = null; message = e instanceof Error ? e.message : String(e); };
   async function act(op: () => Promise<string | void>) { busy = true; render(); try { message = (await op()) || ''; } catch (e) { fail(e); } busy = false; render(); }
@@ -107,7 +107,8 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
           // A family member's result is judged with their own sex and age; the owner's with the scale's profile.
           const reportProfile: ReportProfile | null = family ? personProfile(family, result.measuredAt)
             : profile && { sex: profile.sex, age: ageAt(profile.birthDate, result.measuredAt), heightCm: profile.heightCm };
-          view.append(status, renderBodyComposition(result.detail, when, reportProfile, family ? '試算表人員資料' : '體脂計個人設定'));
+          view.append(status, renderBodyComposition(result.detail, when, reportProfile, family ? '試算表人員資料' : '體脂計個人設定',
+            person && store ? { previous: previousOf(person, result.measuredAt), goals: goalsOf(person) } : {}));
           fresh = view;
           // The result carries the height the scale used: it must be the family member's, or the numbers are not theirs.
           if (family && result.detail.heightCm !== null && Math.abs(result.detail.heightCm - Number(family.身高cm)) > 0.05) {
@@ -120,6 +121,7 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
         }, { stage: s => { stage = s; render(); }, profile: p => { scaleProfile = p; },
           measureFor: family ? { name: family.姓名, birthDate: family.出生日期, sex: family.性別, heightCm: Number(family.身高cm) } : undefined });
         if (mode === 'profile') message = text; else message = fresh ? '' : text;
+        if (mode !== 'profile') probe.disconnect();
       } catch (e) { fail(e); throw e; }
       finally { busy = false; stage = null; render(); }
     }, done);
@@ -160,7 +162,7 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
     const picker = people().length
       ? `<label>量測者<select data-field="person">${groups.map(g => `<optgroup label="${esc(g)}">${people().filter(x => x.群組 === g).map(x =>
           `<option value="${esc(x.id)}" ${x.id === person?.id ? 'selected' : ''}>${esc(x.姓名)}${isOwner(x) ? '（本人）' : ''}</option>`).join('')}</optgroup>`).join('')}</select></label>
-        <div class="person-actions">${person ? '<button type="button" class="link" data-act="edit">編輯資料</button>' : ''}<button type="button" class="link" data-act="add">＋ 新增家人</button></div>
+        ${offline ? '' : `<div class="person-actions">${person ? '<button type="button" class="link" data-act="edit">編輯資料</button>' : ''}<button type="button" class="link" data-act="add">＋ 新增家人</button></div>`}
         ${person && !complete(person) ? `<p class="warn">${esc(person.姓名)} 的資料不完整（${missing(person).join('、')}），無法依性別年齡判定標準。請按「編輯資料」補上。</p>` : ''}
         ${person ? `<form class="add" data-form="edit" hidden>${personFields(person, groups)}<button type="submit">儲存</button></form>` : ''}
         <form class="add" data-form="member" hidden>${personFields({ 群組: groups[0] ?? '家人' }, groups)}<button type="submit">新增</button></form>`
@@ -168,21 +170,22 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
         ${uuid && !p ? `<button class="secondary" data-act="profile" ${busy ? 'disabled' : ''}>從體脂計讀取</button>` : ''}
         <form class="add" data-form="owner">${personFields({ 群組: '家人', 性別: p?.sex, 出生日期: p ? p.birthDate.toISOString().slice(0, 10) : '', 身高cm: p ? String(p.heightCm) : '' }, [])}
           <button type="submit" ${busy ? 'disabled' : ''}>完成</button></form></div>`;
-    section.innerHTML = `<div class="heading"><h2>你的紀錄</h2><span class="badge">${esc(signedInEmail())}</span></div>
+    section.innerHTML = `<div class="heading"><h2>你的紀錄</h2><span class="badge">${offline ? '離線' : esc(signedInEmail())}</span></div>
+      ${offline ? `<p class="warn">目前沒有網路，顯示 ${esc(offlineSavedAt)} 存在這台裝置上的資料，只能查看。連上網路後重新整理即可量測與存檔。</p>` : ''}
       ${picker}
-      ${people().length && !hasBluetooth ? noBluetoothBox() : ''}
-      ${people().length && hasBluetooth ? `<button class="big measure" data-act="measure" ${busy || !canMeasure ? 'disabled' : ''}>開始量測</button>
+      ${!offline && people().length && !hasBluetooth ? noBluetoothBox() : ''}
+      ${!offline && people().length && hasBluetooth ? `<button class="big measure" data-act="measure" ${busy || !canMeasure ? 'disabled' : ''}>開始量測</button>
       ${person && !isOwner(person) && canMeasure ? `<p class="hint">替 ${esc(person.姓名)} 量測時，會把他的生日、性別、身高暫時寫入體脂計，量完自動改回你的資料。</p>` : ''}
       ${canMeasure && !busy ? '<p class="hint">先輕踩一下體脂計，讓螢幕亮起來（體脂計休眠時藍牙找不到它），再按「開始量測」。</p>' : ''}
       ${askFamilyConsent && person && !isOwner(person) ? `<div class="import"><h3>替 ${esc(person.姓名)} 量測</h3><p class="hint">體脂計會用存在機器裡的生日、性別、身高計算。網頁會把 ${esc(person.姓名)} 的這三項暫時寫入體脂計，量完自動改回你的資料，並核對確實改回。這個說明只會出現一次。</p><div class="actions"><button data-act="family-ok">我了解，開始替 ${esc(person.姓名)} 量測</button><button class="quiet" data-act="family-cancel">取消</button></div></div>` : ''}
       ${needIdentity && !uuid ? identityBox() : ''}${progress()}<p role="status">${esc(message)}</p>
       ${isOwner(person) ? `<button class="link" data-act="sync" ${busy ? 'disabled' : ''}>已經在體脂計上量過了？只同步結果</button>` : ''}` : `${progress()}<p role="status">${esc(message)}</p>`}
       <div class="report"></div>
-      <details class="settings"><summary>設定</summary><div class="actions">
+      ${offline ? '' : `<details class="settings"><summary>設定</summary><div class="actions">
         <a class="button secondary" href="${spreadsheetUrl(store!.spreadsheetId)}" target="_blank" rel="noopener">開啟試算表</a>
         <button class="secondary" data-act="refresh">重新整理</button>
         <button class="secondary" data-act="switch-sheet">改用其他試算表</button>
-        <button class="quiet" data-act="signout">登出</button></div></details>`;
+        <button class="quiet" data-act="signout">登出</button></div></details>`}`;
     section.querySelector<HTMLSelectElement>('[data-field=person]')?.addEventListener('change', e => { selectedId = (e.target as HTMLSelectElement).value; saveSelectedPerson(selectedId); fresh = null; message = ''; askFamilyConsent = false; render(); });
     const toggle = (form: string) => () => { const f = section.querySelector<HTMLFormElement>(`[data-form=${form}]`)!; f.hidden = !f.hidden; };
     on('add', toggle('member'));
@@ -213,20 +216,29 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
       if (saved) {
         const birth = new Date(`${person.出生日期}T00:00:00Z`), height = Number(person.身高cm);
         const profile = isNaN(+birth) || !height ? null : { sex: person.性別, age: ageAt(birth, saved.measuredAt), heightCm: height };
-        report.append(renderBodyComposition(saved.detail, `最新一次・${taipeiTime(saved.measuredAt)}`, profile, '試算表人員資料'));
+        const previous = previousOf(person, saved.measuredAt), goals = goalsOf(person);
+        report.append(renderBodyComposition(saved.detail, `最新一次・${taipeiTime(saved.measuredAt)}`, profile, '試算表人員資料', { previous, goals }));
         const exportBtn = document.createElement('button'); exportBtn.className = 'secondary'; exportBtn.textContent = '輸出報告圖片';
         exportBtn.onclick = () => void act(async () => {
           const history = rows.map(r => fromRecord(r)).filter((x): x is NonNullable<typeof x> => !!x).map(x => ({ at: x.measuredAt, weight: x.detail.weightKg, fat: x.detail.bodyFatPct, muscle: x.detail.muscleMassKg }));
-          const out = await exportReport({ name: person.姓名, profile, measuredAt: saved.measuredAt, detail: saved.detail, history });
+          const out = await exportReport({ name: person.姓名, profile, measuredAt: saved.measuredAt, detail: saved.detail, history, previous, goals });
           return `已下載「${out.name}」（${out.width}×${out.height}，${(out.bytes / 1048576).toFixed(1)} MB）。請從「下載」資料夾開啟原檔；傳給別人時請選「原圖」或以檔案傳送，避免被壓縮。`;
         });
         report.prepend(exportBtn);
       }
     }
-    if (person) report.append(renderTrend(store!.records, person), manageRecords(person));
+    if (person) report.append(renderTrend(store!.records, person, goalsOf(person)));
+    if (person && !offline) report.append(manageRecords(person));
     on('copy-link', () => void navigator.clipboard.writeText(location.origin + location.pathname).then(() => { message = '網址已複製，請到 Bluefy 貼上開啟。'; render(); }, () => { message = `請手動複製網址：${location.origin + location.pathname}`; render(); }));
   }
 
+  const goalsOf = (p: Person) => { const n = (v?: string) => v && Number(v) > 0 ? Number(v) : null; return { weightKg: n(p.目標體重kg), bodyFatPct: n(p['目標體脂率%']) }; };
+  /** The person's saved measurement just before `at`, for "比上次". */
+  function previousOf(p: Person, at: Date) {
+    const before = store!.records.filter(r => r['人員id'] === p.id).map(r => fromRecord(r)).filter((x): x is NonNullable<typeof x> => !!x && +x.measuredAt < +at - 1000)
+      .sort((a, b) => +b.measuredAt - +a.measuredAt);
+    return before[0]?.detail ?? null;
+  }
   function personProfile(p: Person, at: Date): ReportProfile | null {
     const birth = new Date(`${p.出生日期}T00:00:00Z`), height = Number(p.身高cm);
     return isNaN(+birth) || !height ? null : { sex: p.性別, age: ageAt(birth, at), heightCm: height };
@@ -276,7 +288,9 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
       <label>群組<input name="群組" required list="rd545-groups" value="${esc(v.群組 ?? '')}"></label><datalist id="rd545-groups">${groups.map(g => `<option value="${esc(g)}">`).join('')}</datalist>
       <label>性別<select name="性別" required><option value="" ${sex ? '' : 'selected'} disabled>請選擇</option><option value="male" ${sex === 'male' ? 'selected' : ''}>男</option><option value="female" ${sex === 'female' ? 'selected' : ''}>女</option></select></label>
       <label>出生日期<input name="出生日期" type="date" required max="${new Date().toISOString().slice(0, 10)}" value="${esc(v.出生日期 ?? '')}"></label>
-      <label>身高 (cm)<input name="身高cm" type="number" min="80" max="250" step="0.1" required value="${esc(v.身高cm ?? '')}"></label>`;
+      <label>身高 (cm)<input name="身高cm" type="number" min="80" max="250" step="0.1" required value="${esc(v.身高cm ?? '')}"></label>
+      <label>目標體重 (kg，選填)<input name="目標體重kg" type="number" min="20" max="300" step="0.1" value="${esc(v.目標體重kg ?? '')}"></label>
+      <label>目標體脂率 (%，選填)<input name="目標體脂率%" type="number" min="3" max="60" step="0.1" value="${esc(v['目標體脂率%'] ?? '')}"></label>`;
   }
   function personForm(name: 'owner' | 'member' | 'edit', asOwner: boolean, existing?: Person) {
     const form = section.querySelector<HTMLFormElement>(`[data-form=${name}]`);
@@ -285,7 +299,8 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
       event.preventDefault();
       const d = new FormData(form);
       const person = { ...existing, 群組: String(d.get('群組')).trim(), 姓名: String(d.get('姓名')).trim(), 性別: d.get('性別') as Person['性別'],
-        出生日期: String(d.get('出生日期')), 身高cm: String(d.get('身高cm')), 體脂計本人: asOwner ? 'true' : 'false' };
+        出生日期: String(d.get('出生日期')), 身高cm: String(d.get('身高cm')), 體脂計本人: asOwner ? 'true' : 'false',
+        目標體重kg: String(d.get('目標體重kg') ?? '').trim(), '目標體脂率%': String(d.get('目標體脂率%') ?? '').trim() };
       if (!complete(person)) { message = `請填完整：${missing(person).join('、')}`; render(); return; }
       void act(async () => { const saved = await savePerson(store!, person); selectedId = saved.id; saveSelectedPerson(selectedId); return existing ? `已更新 ${saved.姓名} 的資料。` : asOwner ? '' : `已新增 ${saved.姓名}。`; });
     };
@@ -297,9 +312,31 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
     const at = stages.findIndex(s => s.key === stage);
     return `<ol class="progress">${stages.map((s, i) => `<li class="${i < at ? 'done' : i === at ? 'now' : ''}">${s.label}</li>`).join('')}</ol>`;
   }
-  function render() {
-    if (!store || !isSignedIn()) signInView();
-    else homeView();
+  /** People and records kept on this device after each online load, so the page can still show them without a network. */
+  const offlineKey = (email: string) => `rd545.offline.${email}`;
+  function keepOfflineCopy() {
+    if (!store || offline || !signedInEmail()) return;
+    local.set(offlineKey(signedInEmail()), JSON.stringify({ savedAt: new Date().toISOString(), spreadsheetId: store.spreadsheetId, people: store.people, records: store.records }));
   }
+  function useOfflineCopy(): boolean {
+    const raw = local.get(offlineKey(rememberedEmail()));
+    if (!raw) return false;
+    try {
+      const copy = JSON.parse(raw) as { savedAt: string; spreadsheetId: string; people: Person[]; records: Store['records'] };
+      store = { spreadsheetId: copy.spreadsheetId, people: copy.people, records: copy.records, settings: {} };
+      offline = true; offlineSavedAt = taipeiTime(new Date(copy.savedAt)).slice(0, 16);
+      if (!selected()) selectedId = owner()?.id ?? people()[0]?.id ?? null;
+      return true;
+    } catch { return false; }
+  }
+  addEventListener('offline', () => { if (!isSignedIn() && useOfflineCopy()) render(); });
+  addEventListener('online', () => { if (offline) { offline = false; store = null; message = '已恢復網路，請登入以更新資料。'; render(); } });
+
+  function render() {
+    if (offline && store) homeView();
+    else if (!store || !isSignedIn()) signInView();
+    else { homeView(); keepOfflineCopy(); }
+  }
+  if (!navigator.onLine) useOfflineCopy();
   render();
 }

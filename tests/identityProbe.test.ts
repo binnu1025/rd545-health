@@ -58,14 +58,14 @@ function measuringProbe(statusFor:(command:number,record?:number)=>number=()=>0,
   const rx=Object.assign(new EventTarget(),{properties:{notify:true},value:new DataView(new ArrayBuffer(0))});
   const suffix='-6b90-4779-83b8-b8bf1dadac35',rxKey=observedServiceUuid+'/273e510e'+suffix;
   const sent:{command:number;payload:number[]}[]=[],assembler=new ExperimentalAssembler();
-  let notifications=0;
+  let notifications=0;const perCommand=new Map<number,number>();
   const notify=(frame:Uint8Array)=>{for(let offset=0;offset<frame.length;offset+=16){const size=Math.min(16,frame.length-offset),p=new Uint8Array(20);p[0]=offset>>8;p[1]=offset&255;p[2]=Math.ceil(frame.length/16)-1;p[3]=size;p.set(frame.subarray(offset,offset+size),4);rx.value=new DataView(p.buffer);notifications++;rx.dispatchEvent(new Event('characteristicvaluechanged'));}};
   const probe={status:'Connected',connectionGeneration:1,device:new EventTarget(),
     characteristics:new Map<string,unknown>([[rxKey,rx],[observedServiceUuid+'/273e5107'+suffix,{properties:{writeWithoutResponse:true}}]]),
     subscriptions:new Map([[rxKey,()=>{}]]),
     async write(_key:string,chunk:Uint8Array){
       const request=assembler.push(chunk);if(!request)return;const command=request[2]*256+request[3];
-      sent.push({command,payload:[...request.slice(4,-1)]});notifications=0;
+      sent.push({command,payload:[...request.slice(4,-1)]});notifications=0;queueMicrotask(()=>perCommand.set(command,notifications));
       // Like the real scale: the result echoes the record number, and a rejected record still sends a full frame.
       if(command===0x3010&&ignoreResults>0){ignoreResults--;return;}
       if(command===0x3010&&records[request[4]-1]){const f=records[request[4]-1].slice();f[4]=statusFor(command,request[4]);f[5]=request[4];f[f.length-1]=0;f[f.length-1]=(255-f.reduce((a,b)=>a+b,0))&255;notify(f);return;}
@@ -74,16 +74,16 @@ function measuringProbe(statusFor:(command:number,record?:number)=>number=()=>0,
       notify(frame);
     },
   } as unknown as BleProbe;
-  return {probe,sent,notifications:()=>notifications};
+  return {probe,sent,notifications:(command:number)=>perCommand.get(command)};
 }
 const uuid='00000000-0000-4000-8000-000000000000';
 it('runs the full synthetic measurement flow and requests result record 1',async()=>{
   const {probe,sent,notifications}=measuringProbe();
   const text=await identifyScale(probe,uuid,true);
-  expect(sent.map(s=>s.command)).toEqual([3,16,32,0x1000,0x2010,0x3000,0x3010]);
+  expect(sent.map(s=>s.command)).toEqual([3,16,32,0x1000,0x2010,0x3000,0x3010,1]);
   expect(sent.find(s=>s.command===0x3000)!.payload).toEqual([0]);
   expect(sent.find(s=>s.command===0x3010)!.payload).toEqual([1]);
-  expect(notifications()).toBe(22);
+  expect(notifications(0x3010)).toBe(22);
   expect(text).toContain('量測時間：2026-10-08 01:42:30');
   expect(text).toContain('體重：1 kg');
   expect(text).toContain('肌肉品質：104 分');
@@ -101,7 +101,7 @@ it('reads every stored record and shows the newest by measurement time',async()=
 it('reads stored results without starting a new measurement',async()=>{
   const {probe,sent}=measuringProbe();
   await identifyScale(probe,uuid,'stored');
-  expect(sent.map(s=>s.command)).toEqual([3,16,32,0x1000,0x3000,0x3010]);
+  expect(sent.map(s=>s.command)).toEqual([3,16,32,0x1000,0x3000,0x3010,1]);
   const {probe:empty}=measuringProbe(undefined,[]);
   await expect(identifyScale(empty,uuid,'stored')).rejects.toThrow('沒有未讀取的測量結果');
 });

@@ -57,7 +57,7 @@ const mom = { name: '媽媽', birthDate: '1960-03-15', sex: 'female' as const, h
 it('measures a family member with their profile, then restores the owner exactly', async () => {
   const s = scale(); const seen: number[] = [];
   const text = await identifyScale(s.probe, uuid, true, () => {}, () => { seen.push(s.stored.height, s.stored.sex); }, { measureFor: mom });
-  expect(s.sent).toEqual([3, 16, 32, 0x1000, 0x1002, 0x2010, 0x3000, 0x3010, 0x1002]);
+  expect(s.sent).toEqual([3, 16, 32, 0x1000, 0x1002, 0x2010, 0x3000, 0x3010, 0x1002, 1]); // ends the session like the official app
   expect(seen).toEqual([1585, 1]);                  // during the measurement the scale held mom's height and sex
   expect(s.stored).toEqual(s.original);             // afterwards the owner's profile is back
   expect(text).not.toContain('還沒改回');
@@ -65,7 +65,7 @@ it('measures a family member with their profile, then restores the owner exactly
 it('restores the owner even when the measurement itself fails', async () => {
   const s = scale({ rejectMeasure: true });
   await expect(identifyScale(s.probe, uuid, true, () => {}, () => {}, { measureFor: mom })).rejects.toThrow('開始測量');
-  expect(s.sent.slice(-1)).toEqual([0x1002]);
+  expect(s.sent.slice(-1)).toEqual([0x1002]);        // restored, and the connection is kept for a retry (no 0x0001)
   expect(s.stored).toEqual(s.original);
 });
 it('never writes a profile when the owner measures', async () => {

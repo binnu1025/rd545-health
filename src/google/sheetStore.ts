@@ -71,6 +71,11 @@ export function birthDate(v: unknown): string {
 export async function load(spreadsheetId: string, api: Fetch = googleFetch): Promise<Store> {
   const ranges = [PEOPLE, RECORDS, SETTINGS].map(t => `ranges=${range(t)}`).join('&');
   const data = await api<{ valueRanges: { values?: unknown[][] }[] }>(`${sheetsApi}/${spreadsheetId}/values:batchGet?${ranges}&valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER`);
+  const peopleHead = (data.valueRanges[0].values?.[0] ?? []) as string[];
+  if (peopleHead.length && peopleHeaders.some(h => !peopleHead.includes(h)) && peopleHeaders.slice(0, peopleHead.length).every((h, i) => peopleHead[i] === h)) {
+    await api(`${sheetsApi}/${spreadsheetId}/values/${q(`'${PEOPLE}'!A1`)}?valueInputOption=RAW`, { method: 'PUT', body: JSON.stringify({ values: [[...peopleHeaders]] }) });
+    data.valueRanges[0].values![0] = [...peopleHeaders];
+  }
   const [people, records, settings] = data.valueRanges.map(v => toObjects(v.values));
   return {
     spreadsheetId,

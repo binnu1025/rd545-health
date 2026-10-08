@@ -4,7 +4,7 @@ import { observedServiceUuid } from './autoReceive';
 import { decodeScaleProfile, type ScaleProfile } from './userProfile';
 import { echoMatches, profileTags, userInfoPayload, type BodyProfile } from './userInfo';
 const verifiedSessions = new WeakMap<BleProbe, { generation:number; uuid:string; rx:BluetoothRemoteGATTCharacteristic }>();
-const commandNames:Record<number,string>={3:'身分驗證',16:'時間同步',32:'型號讀取',0x1000:'讀取個人資料',0x1002:'寫入個人資料',0x2010:'開始測量',0x3000:'取得測量筆數',0x3010:'取得測量結果'};
+const commandNames:Record<number,string>={1:'結束連線',3:'身分驗證',16:'時間同步',32:'型號讀取',0x1000:'讀取個人資料',0x1002:'寫入個人資料',0x2010:'開始測量',0x3000:'取得測量筆數',0x3010:'取得測量結果'};
 // Official TNTDeviceStatus: 5 = RECEIVE_DATA_ERROR, 7 = SEQUENCE_ERROR.
 const statusNames:Record<number,string>={5:'設備回報接收資料錯誤',7:'指令順序錯誤'};
 // Records are numbered from 1 (official app sends 1 when count is 1). Cap guards against a corrupt count.
@@ -22,7 +22,7 @@ export function encodeTaipeiClock(date:Date):Uint8Array {
 }
 /** `allowUserInfo` is passed only for 0x1002 payloads built by userInfoPayload (birth date / sex / height, everything else copied). */
 export function encodeProbeCommand(command: number, payload: Uint8Array, allowUserInfo = false): Uint8Array[] {
-  if (command !== 3 && command !== 16 && command !== 32 && ![0x1000,0x2010,0x3000,0x3010].includes(command) && !(allowUserInfo && command === 0x1002)) throw Error('僅允許驗證身分、時間同步與讀取設備資訊');
+  if (command !== 3 && command !== 16 && command !== 32 && ![1,0x1000,0x2010,0x3000,0x3010].includes(command) && !(allowUserInfo && command === 0x1002)) throw Error('僅允許驗證身分、時間同步與讀取設備資訊');
   const body=new Uint8Array(payload.length+5),size=body.length-2;
   body[0]=size>>8;body[1]=size&255;body[2]=command>>8;body[3]=command&255;body.set(payload,4);
   body[body.length-1]=(255-body.reduce((a,b)=>a+b,0))&255;
@@ -127,7 +127,9 @@ export async function identifyScale(probe:BleProbe, appUuid:string, measure:bool
       ...(others.length?[`其他有效結果的量測時間：${others.join('、')}`]:[]),
       ...(skipped.length?[`略過無效紀錄：${skipped.join('、')}`]:[])].join('\n');
   };
-  if(!family)return measureAndRead();
+  // Like the official app's disconnect(): tell the scale the session is over (0x0001) once everything succeeded.
+  const endSession=async()=>{await request(1,Uint8Array.of(0),4000).catch(()=>{/* the scale may already be closing */});verifiedSessions.delete(probe);};
+  if(!family){const out=await measureAndRead();await endSession();return out;}
   // Family member: write their birth date / sex / height for this measurement, then always restore the owner.
   const ownerTags=profileTags(ownerFrame);
   pending.set(toHex(ownerFrame));
@@ -149,6 +151,7 @@ export async function identifyScale(probe:BleProbe, appUuid:string, measure:bool
     return `${outcome}\n${note}`;
   }
   if(failure)throw failure;
+  await endSession();
   return outcome;
 }
 
