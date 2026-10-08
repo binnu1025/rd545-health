@@ -2,9 +2,9 @@ import type { BleProbe } from '../bluetooth/BleProbe';
 import { observedServiceUuid } from '../bluetooth/autoReceive';
 import { identifyScale, type ScaleStage } from '../bluetooth/identityProbe';
 import { ageAt, type ScaleProfile } from '../bluetooth/userProfile';
-import { isSignedIn, NeedsSignIn, prepareGoogle, rememberedEmail, signedInEmail, signIn, signOut } from '../google/googleAuth';
-import { findOrCreate, load, savePerson, saveRecords, saveSetting, spreadsheetUrl, type Store } from '../google/sheetStore';
-import { fromRecord, listAll, loadConfig, loadSelectedPerson, saveConfig, saveSelectedPerson, toRecord, type Person } from '../storage/sheetClient';
+import { isSignedIn, NeedsSignIn, pickSpreadsheet, prepareGoogle, rememberedEmail, signedInEmail, signIn, signOut } from '../google/googleAuth';
+import { adopt, findOrCreate, findTagged, load, savePerson, saveRecords, saveSetting, spreadsheetUrl, untag, type Store } from '../google/sheetStore';
+import { fromRecord, loadSelectedPerson, saveSelectedPerson, toRecord, type Person } from '../storage/sheetClient';
 import { renderBodyComposition, type ReportProfile } from './bodyFigure';
 import { renderTrend } from './trendChart';
 
@@ -32,7 +32,7 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
   const section = document.createElement('section');
   section.className = 'card app';
   root.prepend(section);
-  let store: Store | null = null, uuid = '', selectedId = loadSelectedPerson(), message = '', busy = false;
+  let store: Store | null = null, choosing = false, needIdentity = false, uuid = '', selectedId = loadSelectedPerson(), message = '', busy = false;
   let scaleProfile: ScaleProfile | null = null, stage: string | null = null, fresh: HTMLElement | null = null;
   const people = () => store?.people ?? [];
   const selected = () => people().find(p => p.id === selectedId) ?? null;
@@ -42,22 +42,48 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
   const fail = (e: unknown) => { if (e instanceof NeedsSignIn) store = null; message = e instanceof Error ? e.message : String(e); };
   async function act(op: () => Promise<string | void>) { busy = true; render(); try { message = (await op()) || ''; } catch (e) { fail(e); } busy = false; render(); }
 
+  const choiceKey = (email: string) => `rd545.sheetChoice.${email}`;
   async function connectGoogle() {
     message = '正在登入 Google…'; busy = true; render();
     try {
       const email = await signIn();
       message = '正在開啟你的試算表…'; render();
-      let id = local.get(sheetIdKey(email));
-      try { if (!id) throw Error(); store = await load(id); }
-      catch { id = await findOrCreate(); local.set(sheetIdKey(email), id); store = await load(id); }
-      // A device set up with the old setup code still remembers the identity: adopt it instead of asking for the file.
-      const legacyIdentity = local.get('rd545.identity');
-      uuid = store.settings[identityKey] || uuid || (legacyIdentity && uuidPattern.test(legacyIdentity) ? legacyIdentity.toLowerCase() : '');
-      if (uuid && !store.settings[identityKey]) await saveSetting(store, identityKey, uuid);
-      if (!selected()) { selectedId = owner()?.id ?? people()[0]?.id ?? null; saveSelectedPerson(selectedId); }
+      const id = local.get(sheetIdKey(email)) || await findTagged();
+      if (id) await openSheet(id).catch(async () => { const tagged = await findTagged(); if (!tagged) throw Error('找不到你的試算表'); await openSheet(tagged); });
+      // First time on this account, or only the empty sheet created before the choice existed: ask once.
+      choosing = !store || (!local.get(choiceKey(email)) && !store.people.length && !store.records.length);
       message = '';
     } catch (e) { fail(e); }
     busy = false; render();
+  }
+  async function openSheet(id: string) {
+    store = await load(id);
+    local.set(sheetIdKey(signedInEmail()), id);
+    // A device set up with the old setup code still remembers the identity: adopt it instead of asking for the file.
+    const legacyIdentity = local.get('rd545.identity');
+    uuid = store.settings[identityKey] || uuid || (legacyIdentity && uuidPattern.test(legacyIdentity) ? legacyIdentity.toLowerCase() : '');
+    if (uuid && !store.settings[identityKey]) await saveSetting(store, identityKey, uuid);
+    if (!selected()) { selectedId = owner()?.id ?? people()[0]?.id ?? null; saveSelectedPerson(selectedId); }
+  }
+  function chooseView() {
+    section.innerHTML = `<h2>你的試算表</h2>
+      <p class="hint">量測紀錄存在你 Google 帳號裡的試算表。之前已經有紀錄的話，選那一份，網頁就直接用它（原本的資料不會被更動）；第一次使用就建立新的。</p>
+      <button class="big" data-act="pick" ${busy ? 'disabled' : ''}>使用我原本的試算表</button>
+      <button class="secondary" data-act="new" ${busy ? 'disabled' : ''}>這是新帳號，建立新的試算表</button><p role="status">${esc(message)}</p>`;
+    on('pick', () => void act(async () => {
+      const picked = await pickSpreadsheet();
+      if (!picked) return '沒有選擇試算表。';
+      const previous = store?.spreadsheetId;
+      await adopt(picked);
+      if (previous && previous !== picked) await untag(previous);
+      await openSheet(picked);
+      local.set(choiceKey(signedInEmail()), 'existing'); choosing = false;
+      return `已改用你原本的試算表${previous && previous !== picked ? '。先前自動建立的空白試算表已不再使用，可自行從雲端硬碟刪除' : ''}。`;
+    }));
+    on('new', () => void act(async () => {
+      await openSheet(store?.spreadsheetId ?? await findOrCreate());
+      local.set(choiceKey(signedInEmail()), 'new'); choosing = false;
+    }));
   }
 
   /** Connects and verifies the scale; `mode` decides whether to only read its profile, read stored results, or measure. */
@@ -85,19 +111,6 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
     }, done);
   }
 
-  /** Copies people and measurements from the spreadsheet this browser used before Google sign-in (Apps Script). */
-  async function importLegacy(): Promise<string> {
-    const legacy = loadConfig();
-    if (!legacy) return '';
-    const old = await listAll(legacy);
-    for (const p of old.people) if (!people().some(x => x.id === p.id)) await savePerson(store!, { ...p, 身高cm: String(p.身高cm), 出生日期: String(p.出生日期), 體脂計本人: String(p.體脂計本人) });
-    const added = await saveRecords(store!, old.records.map(r => ({ ...r, 量測時間: new Date(String(r['量測時間'])).toISOString() })));
-    saveConfig(null);
-    if (!selected()) { selectedId = owner()?.id ?? people()[0]?.id ?? null; saveSelectedPerson(selectedId); }
-    return `已從舊試算表搬入 ${old.people.length} 位人員、${added} 筆紀錄。`;
-  }
-  const legacyBox = () => loadConfig() ? '<div class="import"><h3>你之前的數據</h3><p class="hint">這個瀏覽器記得你之前用的試算表。按一下就把人員和量測紀錄搬進你帳號的新試算表（重複的會略過，舊試算表保留不動）。</p><button data-act="migrate">搬入之前的數據</button></div>' : '';
-
   function signInView() {
     const hint = rememberedEmail();
     section.innerHTML = `<h2>歡迎</h2><p class="hint">用 Google 帳號登入。人員和量測紀錄會存在你自己雲端硬碟裡的試算表，任何手機或電腦登入同一個帳號都看得到。</p>
@@ -107,69 +120,69 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
     on('other', () => { signOut(); void connectGoogle(); });
   }
 
-  function identityView() {
-    section.innerHTML = `${stepper(2)}<h2>連接你的體脂計</h2>
-      <p class="hint">網頁需要一組「身分」才能和你的體脂計對話。載入一次後會存進你的試算表，之後每台裝置登入就自動取得。</p>
+  /** File input for the scale identity, shown only when a measurement needs it and none is stored yet. */
+  function identityBox() {
+    return `<div class="import identity-box"><h3>第一次量測：連接體脂計</h3>
+      <p class="hint">網頁需要一組「身分」才能和你的體脂計對話。載入一次就會存進你的試算表，之後每台裝置都會自動取得。</p>
       <label>身分檔（identity-probe.json）<input type="file" accept=".json" data-field="identity"></label>
-      <p class="hint">還沒有身分檔？網頁自己和體脂計配對的功能開發中，完成後這一步會改成「按一下配對」。</p>${legacyBox()}<p role="status">${esc(message)}</p>`;
-    on('migrate', () => void act(importLegacy));
-    section.querySelector<HTMLInputElement>('[data-field=identity]')!.onchange = e => void act(async () => {
+      <p class="hint">網頁自己和體脂計配對的功能開發中，完成後這裡會改成「按一下配對」。</p></div>`;
+  }
+  function bindIdentityBox() {
+    section.querySelector<HTMLInputElement>('[data-field=identity]')?.addEventListener('change', e => void act(async () => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
       if (file.size > 2048) throw Error('這不是身分檔，請選擇 identity-probe.json');
       const data = JSON.parse(await file.text());
       if (data.purpose !== 'RD545_IDENTITY_PROBE' || typeof data.appUuid !== 'string' || !uuidPattern.test(data.appUuid)) throw Error('身分檔格式錯誤');
-      uuid = data.appUuid.toLowerCase();
+      uuid = data.appUuid.toLowerCase(); needIdentity = false;
       await saveSetting(store!, identityKey, uuid);
-    });
-  }
-
-  function whoView() {
-    const p = scaleProfile, birth = p ? p.birthDate.toISOString().slice(0, 10) : '';
-    section.innerHTML = `${stepper(3)}<h2>這是你嗎？</h2>
-      <p class="hint">${p ? '已從體脂計讀到下面的資料，填上名字就完成了。' : '按「從體脂計讀取」自動帶入體脂計裡的性別、生日與身高（體脂計需在附近），或自己填寫。'}</p>
-      ${p ? '' : `<button class="secondary" data-act="profile" ${busy ? 'disabled' : ''}>從體脂計讀取</button>`}${progress()}
-      <form class="add" data-form="owner">
-        <label>你的名字<input name="姓名" required></label>
-        <label>群組<input name="群組" required value="家人"></label>
-        <label>性別<select name="性別"><option value="male" ${p?.sex === 'male' ? 'selected' : ''}>男</option><option value="female" ${p?.sex === 'female' ? 'selected' : ''}>女</option></select></label>
-        <label>出生日期<input name="出生日期" type="date" required value="${birth}"></label>
-        <label>身高 (cm)<input name="身高cm" type="number" min="80" max="250" step="0.1" required value="${p?.heightCm ?? ''}"></label>
-        <button type="submit" ${busy ? 'disabled' : ''}>完成</button></form>${legacyBox()}<p role="status">${esc(message)}</p>`;
-    on('migrate', () => void act(importLegacy));
-    on('profile', () => void useScale('profile', '已讀取體脂計資料。'));
-    personForm('owner', true);
+      return '已連接體脂計。請再按一次「開始量測」。';
+    }));
   }
 
   function homeView() {
-    const person = selected(), groups = [...new Set(people().map(x => x.群組))], legacy = loadConfig();
+    const person = selected(), groups = [...new Set(people().map(x => x.群組))], p = scaleProfile;
     const canMeasure = isOwner(person);
-    section.innerHTML = `<div class="heading"><h2>量測</h2><span class="badge">${esc(signedInEmail())}</span></div>
-      <div class="chips-groups">${groups.map(g => `<div class="chip-group"><small>${esc(g)}</small><div class="chips">${people().filter(x => x.群組 === g).map(x =>
-        `<button type="button" class="chip" data-person="${esc(x.id)}" aria-pressed="${x.id === person?.id}">${esc(x.姓名)}${isOwner(x) ? '・本人' : ''}</button>`).join('')}</div></div>`).join('')}
-        <button type="button" class="chip add-chip" data-act="add">＋ 新增家人</button></div>
-      <form class="add" data-form="member" hidden>
-        <label>名字<input name="姓名" required></label><label>群組<input name="群組" required list="rd545-groups" value="${esc(groups[0] ?? '家人')}"></label><datalist id="rd545-groups">${groups.map(g => `<option value="${esc(g)}">`).join('')}</datalist>
-        <label>性別<select name="性別"><option value="male">男</option><option value="female">女</option></select></label>
-        <label>出生日期<input name="出生日期" type="date" required></label><label>身高 (cm)<input name="身高cm" type="number" min="80" max="250" step="0.1" required></label>
-        <button type="submit">新增</button></form>
-      <button class="big measure" data-act="measure" ${busy || !canMeasure ? 'disabled' : ''}>開始量測</button>
+    const picker = people().length
+      ? `<label>量測者<select data-field="person">${groups.map(g => `<optgroup label="${esc(g)}">${people().filter(x => x.群組 === g).map(x =>
+          `<option value="${esc(x.id)}" ${x.id === person?.id ? 'selected' : ''}>${esc(x.姓名)}${isOwner(x) ? '（本人）' : ''}</option>`).join('')}</optgroup>`).join('')}</select></label>
+        <button type="button" class="link" data-act="add">＋ 新增家人</button>
+        <form class="add" data-form="member" hidden>
+          <label>名字<input name="姓名" required></label><label>群組<input name="群組" required list="rd545-groups" value="${esc(groups[0] ?? '家人')}"></label><datalist id="rd545-groups">${groups.map(g => `<option value="${esc(g)}">`).join('')}</datalist>
+          <label>性別<select name="性別"><option value="male">男</option><option value="female">女</option></select></label>
+          <label>出生日期<input name="出生日期" type="date" required></label><label>身高 (cm)<input name="身高cm" type="number" min="80" max="250" step="0.1" required></label>
+          <button type="submit">新增</button></form>`
+      : `<div class="import"><h3>先新增你自己</h3><p class="hint">填好之後就能開始量測。${uuid ? '體脂計在旁邊的話，可以按「從體脂計讀取」自動帶入性別、生日與身高。' : ''}</p>
+        ${uuid && !p ? `<button class="secondary" data-act="profile" ${busy ? 'disabled' : ''}>從體脂計讀取</button>` : ''}
+        <form class="add" data-form="owner">
+          <label>你的名字<input name="姓名" required></label><label>群組<input name="群組" required value="家人"></label>
+          <label>性別<select name="性別"><option value="male" ${p?.sex === 'male' ? 'selected' : ''}>男</option><option value="female" ${p?.sex === 'female' ? 'selected' : ''}>女</option></select></label>
+          <label>出生日期<input name="出生日期" type="date" required value="${p ? p.birthDate.toISOString().slice(0, 10) : ''}"></label>
+          <label>身高 (cm)<input name="身高cm" type="number" min="80" max="250" step="0.1" required value="${p?.heightCm ?? ''}"></label>
+          <button type="submit" ${busy ? 'disabled' : ''}>完成</button></form></div>`;
+    section.innerHTML = `<div class="heading"><h2>你的紀錄</h2><span class="badge">${esc(signedInEmail())}</span></div>
+      ${picker}
+      ${people().length ? `<button class="big measure" data-act="measure" ${busy || !canMeasure ? 'disabled' : ''}>開始量測</button>
       ${!canMeasure && person ? `<p class="warn">${esc(person.姓名)} 的量測還不能用：體脂計目前只會用本人的身高、年齡、性別計算。替家人量測的功能開發中。</p>` : ''}
-      ${progress()}<p role="status">${esc(message)}</p>
-      <button class="link" data-act="sync" ${busy ? 'disabled' : ''}>已經在體脂計上量過了？只同步結果</button>
+      ${needIdentity && !uuid ? identityBox() : ''}${progress()}<p role="status">${esc(message)}</p>
+      ${canMeasure ? `<button class="link" data-act="sync" ${busy ? 'disabled' : ''}>已經在體脂計上量過了？只同步結果</button>` : ''}` : `${progress()}<p role="status">${esc(message)}</p>`}
       <div class="report"></div>
       <details class="settings"><summary>設定</summary><div class="actions">
         <a class="button secondary" href="${spreadsheetUrl(store!.spreadsheetId)}" target="_blank" rel="noopener">開啟試算表</a>
-        <button class="secondary" data-act="refresh">重新整理</button>${legacy ? '<button class="secondary" data-act="migrate">匯入舊試算表資料</button>' : ''}
+        <button class="secondary" data-act="refresh">重新整理</button>
         <button class="quiet" data-act="signout">登出</button></div></details>`;
-    section.querySelectorAll<HTMLButtonElement>('[data-person]').forEach(b => b.onclick = () => { selectedId = b.dataset.person!; saveSelectedPerson(selectedId); fresh = null; message = ''; render(); });
+    section.querySelector<HTMLSelectElement>('[data-field=person]')?.addEventListener('change', e => { selectedId = (e.target as HTMLSelectElement).value; saveSelectedPerson(selectedId); fresh = null; message = ''; render(); });
     on('add', () => { const f = section.querySelector<HTMLFormElement>('[data-form=member]')!; f.hidden = !f.hidden; });
     personForm('member', false);
-    on('measure', () => void useScale(true, '量測完成。'));
-    on('sync', () => void useScale('stored', '已同步體脂計的結果。'));
+    personForm('owner', true);
+    bindIdentityBox();
+    // The scale is only needed when measuring; without an identity yet, ask for it right here.
+    const needsScale = (go: () => void) => () => { if (!uuid) { needIdentity = true; message = ''; render(); return; } go(); };
+    on('measure', needsScale(() => void useScale(true, '量測完成。')));
+    on('sync', needsScale(() => void useScale('stored', '已同步體脂計的結果。')));
+    on('profile', () => void useScale('profile', '已讀取體脂計資料。'));
     on('refresh', () => void act(async () => { store = await load(store!.spreadsheetId); }));
     on('signout', () => { signOut(); store = null; fresh = null; message = '已登出。'; render(); });
-    on('migrate', () => void act(importLegacy));
     // Result area: a fresh reading from this visit, otherwise the newest saved row; then the trend.
     const report = section.querySelector<HTMLElement>('.report')!;
     if (fresh) report.append(fresh);
@@ -198,16 +211,14 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
   }
 
   const on = (act: string, handler: () => void) => section.querySelector<HTMLButtonElement>(`[data-act=${act}]`)?.addEventListener('click', handler);
-  const stepper = (current: number) => `<ol class="stepper">${['登入', '連接體脂計', '建立你的資料'].map((s, i) => `<li class="${i + 1 < current ? 'done' : i + 1 === current ? 'now' : ''}">${s}</li>`).join('')}</ol>`;
   function progress() {
     if (!stage) return '';
     const at = stages.findIndex(s => s.key === stage);
     return `<ol class="progress">${stages.map((s, i) => `<li class="${i < at ? 'done' : i === at ? 'now' : ''}">${s.label}</li>`).join('')}</ol>`;
   }
   function render() {
-    if (!store || !isSignedIn()) signInView();
-    else if (!uuid) identityView();
-    else if (!owner()) whoView();
+    if (choosing && isSignedIn()) chooseView();
+    else if (!store || !isSignedIn()) signInView();
     else homeView();
   }
   render();

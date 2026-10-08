@@ -30,9 +30,8 @@ const q = (s: string) => encodeURIComponent(s);
 const range = (tab: string) => q(`'${tab}'`);
 
 export async function findOrCreate(api: Fetch = googleFetch): Promise<string> {
-  const query = `appProperties has { key='${tag.key}' and value='${tag.value}' } and trashed=false`;
-  const found = await api<{ files: { id: string }[] }>(`${driveApi}?q=${q(query)}&fields=files(id)&spaces=drive`);
-  if (found.files.length) return found.files[0].id;
+  const found = await findTagged(api);
+  if (found) return found;
   const created = await api<{ spreadsheetId: string; sheets: { properties: { sheetId: number; title: string } }[] }>(sheetsApi, { method: 'POST', body: JSON.stringify({
     properties: { title: 'RD-545 體組成紀錄', timeZone: 'Asia/Taipei', locale: 'zh_TW' },
     sheets: [PEOPLE, RECORDS, SETTINGS].map(title => ({ properties: { title, gridProperties: { frozenRowCount: 1 } } })),
@@ -108,3 +107,31 @@ export async function saveSetting(store: Store, key: string, value: string, api:
 }
 
 export const spreadsheetUrl = (id: string) => `https://docs.google.com/spreadsheets/d/${id}/edit`;
+
+/** Looks up the account's tagged spreadsheet without creating one. */
+export async function findTagged(api: Fetch = googleFetch): Promise<string | null> {
+  const query = `appProperties has { key='${tag.key}' and value='${tag.value}' } and trashed=false`;
+  const found = await api<{ files: { id: string }[] }>(`${driveApi}?q=${q(query)}&fields=files(id)&spaces=drive`);
+  return found.files[0]?.id ?? null;
+}
+
+/**
+ * Uses a spreadsheet the user picked (e.g. the one they already had). Existing rows are never changed:
+ * only a missing tab is added with its header row, then the file is tagged so every device finds it.
+ */
+export async function adopt(id: string, api: Fetch = googleFetch): Promise<string> {
+  const meta = await api<{ sheets: { properties: { title: string } }[] }>(`${sheetsApi}/${id}?fields=sheets.properties.title`);
+  const have = new Set(meta.sheets.map(s => s.properties.title));
+  const missing = ([[PEOPLE, peopleHeaders], [RECORDS, recordHeaders], [SETTINGS, settingsHeaders]] as const).filter(([title]) => !have.has(title));
+  if (missing.length) {
+    await api(`${sheetsApi}/${id}:batchUpdate`, { method: 'POST', body: JSON.stringify({ requests: missing.map(([title]) => ({ addSheet: { properties: { title, gridProperties: { frozenRowCount: 1 } } } })) }) });
+    await api(`${sheetsApi}/${id}/values:batchUpdate`, { method: 'POST', body: JSON.stringify({ valueInputOption: 'RAW', data: missing.map(([title, headers]) => ({ range: `'${title}'!A1`, values: [[...headers]] })) }) });
+  }
+  await api(`${driveApi}/${id}`, { method: 'PATCH', body: JSON.stringify({ appProperties: { [tag.key]: tag.value } }) });
+  return id;
+}
+
+/** Stops the app from finding a spreadsheet again (the file itself is left in Drive). */
+export async function untag(id: string, api: Fetch = googleFetch) {
+  await api(`${driveApi}/${id}`, { method: 'PATCH', body: JSON.stringify({ appProperties: { [tag.key]: null } }) });
+}

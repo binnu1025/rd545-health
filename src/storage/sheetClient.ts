@@ -1,34 +1,17 @@
 import type { BodyComposition } from '../bluetooth/bodyComposition';
 
-/**
- * Shared row types and the row <-> body-composition mapping. The Apps Script connection below is kept only to
- * import data from the spreadsheet the app used before Google sign-in.
- */
-export interface SheetConfig { url: string; token: string }
+/** Shared row types, the row <-> body-composition mapping, and this device's selected person. */
 export interface Person { id: string; 群組: string; 姓名: string; 性別: 'male' | 'female'; 出生日期: string; 身高cm: string; 體脂計本人: string; 建立時間?: string }
 export type SheetRecord = Record<string, string | number | null>;
 
-const configKey = 'rd545.sheet', selectedKey = 'rd545.selectedPerson';
+const selectedKey = 'rd545.selectedPerson';
 const read = (key: string) => { try { return localStorage.getItem(key); } catch { return null; } };
 const write = (key: string, value: string | null) => { try { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value); } catch { /* storage blocked: settings last for this visit only */ } };
 
-export function loadConfig(): SheetConfig | null {
-  try { const c = JSON.parse(read(configKey) ?? 'null'); return c && typeof c.url === 'string' && typeof c.token === 'string' ? c : null; } catch { return null; }
-}
-export const saveConfig = (config: SheetConfig | null) => write(configKey, config && JSON.stringify(config));
 export const loadSelectedPerson = () => read(selectedKey);
 export const saveSelectedPerson = (id: string | null) => write(selectedKey, id);
 
-async function call<T>(config: SheetConfig, action: string, payload: object = {}): Promise<T> {
-  // text/plain keeps this a "simple" request, which Apps Script web apps accept cross-origin without a preflight.
-  const response = await fetch(config.url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ token: config.token, action, ...payload }) });
-  if (!response.ok) throw Error(`Google 試算表回應 ${response.status}`);
-  const data = await response.json().catch(() => { throw Error('Google 試算表回應不是 JSON：請確認部署的「誰可以存取」為「所有人」'); });
-  if (!data.ok) throw Error(`Google 試算表：${data.error ?? '未知錯誤'}`);
-  return data as T;
-}
 
-export const listAll = (c: SheetConfig) => call<{ people: Person[]; records: SheetRecord[] }>(c, 'list');
 
 /** Rebuilds a saved row for the report, so the latest result shows without touching the scale. */
 export function fromRecord(r: SheetRecord): { measuredAt: Date; detail: BodyComposition } | null {

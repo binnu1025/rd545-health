@@ -6,7 +6,7 @@ import type { BodyComposition } from '../src/bluetooth/bodyComposition';
 
 // In-memory stand-in for the Drive and Sheets REST endpoints the store calls.
 function fakeGoogle(existing = false) {
-  const tabs = new Map<string, unknown[][]>(), calls: string[] = [];
+  const tabs = new Map<string, unknown[][]>(), calls: string[] = [], patched: unknown[] = [];
   let tagged = existing;
   if (existing) for (const t of ['人員', '量測紀錄', '設定']) tabs.set(t, []);
   const tabOf = (u: string) => decodeURIComponent(u).match(/'([^']+)'/)![1];
@@ -14,19 +14,20 @@ function fakeGoogle(existing = false) {
     const method = init.method ?? 'GET', body = init.body ? JSON.parse(String(init.body)) : null;
     calls.push(`${method} ${url.split('?')[0].replace('https://', '')}`);
     if (url.includes('drive/v3/files?')) return { files: tagged ? [{ id: 's1' }] : [] };
-    if (method === 'PATCH') { tagged = body.appProperties.rd545 === 'health'; return {}; }
+    if (method === 'GET' && url.includes('?fields=sheets.properties.title')) return { sheets: [...tabs.keys()].map(title => ({ properties: { title } })) };
+    if (method === 'PATCH') { tagged = body.appProperties.rd545 === 'health'; patched.push(body.appProperties.rd545); return {}; }
     if (method === 'POST' && url.endsWith('/v4/spreadsheets')) {
       body.sheets.forEach((s: { properties: { title: string } }) => tabs.set(s.properties.title, []));
       return { spreadsheetId: 's1', sheets: body.sheets.map((s: { properties: { title: string } }, i: number) => ({ properties: { sheetId: i, title: s.properties.title } })) };
     }
     if (url.includes('values:batchUpdate')) { for (const d of body.data) tabs.get(tabOf(d.range))!.splice(0, 1, d.values[0]); return {}; }
-    if (url.endsWith(':batchUpdate')) return {};
+    if (url.endsWith(':batchUpdate')) { for (const r of body.requests) if (r.addSheet) tabs.set(r.addSheet.properties.title, []); return {}; }
     if (url.includes('values:batchGet')) return { valueRanges: [...url.matchAll(/ranges=([^&]+)/g)].map(m => ({ values: tabs.get(tabOf(m[1])) })) };
     if (url.includes(':append')) { tabs.get(tabOf(url))!.push(...body.values); return {}; }
     if (method === 'PUT') { const row = Number(decodeURIComponent(url).match(/!A(\d+)/)![1]); tabs.get(tabOf(url))![row - 1] = body.values[0]; return {}; }
     throw Error(`unexpected ${method} ${url}`);
   }) as <T>(url: string, init?: RequestInit) => Promise<T>;
-  return { api, tabs, calls };
+  return { api, tabs, calls, patched, untagged: () => !tagged };
 }
 const detail: BodyComposition = { heightCm: 170, weightKg: 70, bmi: 24.2, bodyFatPct: 20, muscleMassKg: 52, muscleScore: 1, boneMassKg: 2.9, bmrKcal: 1600,
   metabolicAge: 35, visceralFat: 8, bodyWaterPct: 55, muscleQuality: 60,
@@ -72,4 +73,18 @@ it('rebuilds a saved row into the same body composition for the report', () => {
   expect(back.measuredAt.toISOString()).toBe(at.toISOString());
   expect(back.detail).toEqual({ ...detail, segments: { ...detail.segments, trunk: { ...detail.segments.trunk, muscleQuality: null } } });
   expect(fromRecord({ 量測時間: 'not a date' })).toBeNull();
+});
+it('adopts a spreadsheet the user already had without touching its rows', async () => {
+  const { adopt, untag } = await import('../src/google/sheetStore');
+  const g = fakeGoogle();
+  const existingPerson = ['p1', '家人', '我', 'male', '1990-01-01', '174', 'true', ''];
+  g.tabs.set('人員', [['id', '群組', '姓名', '性別', '出生日期', '身高cm', '體脂計本人', '建立時間'], existingPerson]);
+  g.tabs.set('量測紀錄', [[...recordHeaders], ['k', 46000]]);
+  await adopt('s1', g.api);
+  expect([...g.tabs.keys()]).toEqual(['人員', '量測紀錄', '設定']);          // only the missing tab added
+  expect(g.tabs.get('人員')![1]).toEqual(existingPerson);                      // rows untouched
+  expect(g.tabs.get('量測紀錄')).toHaveLength(2);
+  expect(g.patched).toEqual(['health']);                                   // tagged for other devices
+  await untag('old-empty', g.api);
+  expect(g.patched).toEqual(['health', null]);
 });

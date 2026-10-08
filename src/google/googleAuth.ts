@@ -57,6 +57,39 @@ export function signOut() {
   try { localStorage.removeItem(hintKey); } catch { /* visit-only */ }
 }
 
+/**
+ * Google's own file picker, used once by accounts that already have a spreadsheet: picking a file is what
+ * grants this drive.file app access to it. The key is a browser key restricted to this site and the Picker API.
+ */
+export const googlePickerKey = 'AIzaSyApuowWMADkuCqsW2LzlMpqQaetGgZwqlQ';
+const googleAppId = googleClientId.split('-')[0];
+interface PickerResult { action: string; docs?: { id: string }[] }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type PickerNs = any;
+let pickerReady: Promise<PickerNs> | null = null;
+function loadPicker(): Promise<PickerNs> {
+  pickerReady ??= new Promise((resolve, reject) => {
+    const s = document.createElement('script'); s.src = 'https://apis.google.com/js/api.js'; s.async = true;
+    s.onload = () => (window as unknown as { gapi: { load(name: string, cb: () => void): void } }).gapi.load('picker', () => resolve((window.google as unknown as { picker: PickerNs }).picker));
+    s.onerror = () => { pickerReady = null; reject(Error('無法載入 Google 選檔視窗，請確認網路連線')); };
+    document.head.append(s);
+  });
+  return pickerReady;
+}
+/** Resolves to the picked spreadsheet id, or null when the user closes the picker. */
+export async function pickSpreadsheet(): Promise<string | null> {
+  if (!isSignedIn()) throw new NeedsSignIn();
+  if (!googlePickerKey) throw Error('選檔功能尚未設定完成');
+  const picker = await loadPicker();
+  return new Promise(resolve => {
+    const view = new picker.DocsView(picker.ViewId.SPREADSHEETS).setMode(picker.DocsViewMode.LIST);
+    new picker.PickerBuilder().addView(view).setOAuthToken(token).setDeveloperKey(googlePickerKey).setAppId(googleAppId)
+      .setTitle('選擇你原本的試算表').setLocale('zh-TW')
+      .setCallback((r: PickerResult) => { if (r.action === picker.Action.PICKED) resolve(r.docs?.[0]?.id ?? null); else if (r.action === picker.Action.CANCEL) resolve(null); })
+      .build().setVisible(true);
+  });
+}
+
 export class NeedsSignIn extends Error { constructor() { super('Google 登入已過期，請再按一次「用 Google 登入」'); } }
 
 export async function googleFetch<T>(url: string, init: RequestInit = {}): Promise<T> {
