@@ -12,6 +12,8 @@ export interface BarItem {
   previous?: number | null;
   /** The person's own goal for this value (weight, body fat). */
   goal?: number | null;
+  /** One plain-language line showing how the value was worked out. */
+  formula?: string;
 }
 
 /** Everything needed to draw one bar, in percent of the track width; shared by the page and the JPG report. */
@@ -93,7 +95,7 @@ function row(item: BarItem): string {
   const ticks = m.ticks.map(t => `<span class="tick${t.strong ? ' marker' : ''}" style="left:${t.at}%">${t.label}</span>`).join('');
   return `<div class="bar-row ${m.state}"><div class="bar-label">${item.label}<small>${item.unit}</small></div>
     <div class="bar-track">${zones}${lines}<b class="bar-fill" style="left:${m.fillFrom}%;width:${m.fillWidth}%"></b>${ticks}</div>
-    <div class="bar-result"><strong>${fmt(m.value, item.digits)}</strong><span class="verdict">${m.verdict}</span>${m.gap ? `<small>${m.gap}</small>` : ''}${m.goalText ? `<small class="goal-text">${m.goalText}</small>` : ''}${m.change ? `<small class="delta">${m.change}</small>` : ''}</div></div>`;
+    <div class="bar-result"><strong>${fmt(m.value, item.digits)}</strong><span class="verdict">${m.verdict}</span>${m.gap ? `<small>${m.gap}</small>` : ''}${m.goalText ? `<small class="goal-text">${m.goalText}</small>` : ''}${m.change ? `<small class="delta">${m.change}</small>` : ''}</div>${item.formula ? `<p class="bar-formula">${item.formula}</p>` : ''}</div>`;
 }
 
 export function renderBars(items: BarItem[]): HTMLElement {

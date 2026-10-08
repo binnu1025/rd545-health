@@ -10,7 +10,7 @@ export interface ReportInput {
   previous?: BodyComposition | null; goals?: Goals;
 }
 
-const W = 1240, H = 1840;
+const W = 1240, H = 1866;
 const font = `'Noto Sans TC','Microsoft JhengHei','PingFang TC','Heiti TC',sans-serif`;
 const ink = '#183d38', muted = '#5d7a70', line = '#dce7e1', brand = '#0b5b4b';
 const stateColor = { low: '#4f7fa3', normal: '#1e7a5d', high: '#b5651d', plain: '#2f4f47' };
@@ -60,9 +60,11 @@ function trends(input: ReportInput, x: number, y: number, w: number, h: number):
 
 /** Bar rows: label | track with zones and fill | value, verdict and distance from normal. */
 function bars(items: BarItem[], y: number): { svg: string; height: number } {
-  const trackX = 250, trackW = 600, rowH = 66;
+  const trackX = 250, trackW = 600, rowH = 66, formulaH = 26;
+  let top = y - rowH;
   const svg = items.map((item, i) => {
-    const top = y + i * rowH, m = barModel(item);
+    top += rowH + (i > 0 && items[i - 1].formula ? formulaH : 0);
+    const m = barModel(item), h = rowH + (item.formula ? formulaH : 0);
     const label = `<text x="70" y="${top + 26}" font-size="20" font-weight="700" fill="${ink}">${xml(item.label)}</text><text x="70" y="${top + 47}" font-size="14" fill="${muted}">${xml(item.unit)}</text>`;
     if (!m) return `${label}<rect x="${trackX}" y="${top + 12}" width="${trackW}" height="18" rx="3" fill="#f1f4f2"/><text x="880" y="${top + 28}" font-size="20" fill="${muted}">—</text>`;
     const px = (pct: number) => trackX + trackW * pct / 100;
@@ -78,9 +80,9 @@ function bars(items: BarItem[], y: number): { svg: string; height: number } {
       + `<rect x="${980}" y="${top + 9}" width="${verdictW}" height="26" rx="13" fill="${pillBg}"/><text x="${980 + verdictW / 2}" y="${top + 27}" text-anchor="middle" font-size="${small ? 12 : 14}" font-weight="700" fill="${pillInk}">${xml(m.verdict)}</text>`
       + (m.gap || m.goalText ? `<text x="880" y="${top + 54}" font-size="14" fill="${muted}">${xml([m.gap, m.goalText].filter(Boolean).join('・'))}</text>` : '')
       + (m.change ? `<text x="${990 + verdictW}" y="${top + 27}" font-size="14" fill="${muted}">${xml(m.change)}</text>` : '');
-    return `${label}<rect x="${trackX}" y="${top + 12}" width="${trackW}" height="18" rx="3" fill="#f4f7f5"/>${zones}${lines}${fill}${ticks}${result}<line x1="60" x2="${W - 60}" y1="${top + rowH - 2}" y2="${top + rowH - 2}" stroke="#eef3f0"/>`;
+    return `${label}<rect x="${trackX}" y="${top + 12}" width="${trackW}" height="18" rx="3" fill="#f4f7f5"/>${zones}${lines}${fill}${ticks}${result}${item.formula ? `<rect x="250" y="${top + 62}" width="${W - 310}" height="24" rx="5" fill="#f4f8f6"/><text x="262" y="${top + 79}" font-size="14" fill="${ink}">${xml(item.formula)}</text>` : ''}<line x1="60" x2="${W - 60}" y1="${top + h - 2}" y2="${top + h - 2}" stroke="#eef3f0"/>`;
   }).join('');
-  return { svg, height: items.length * rowH };
+  return { svg, height: items.length * rowH + items.filter(i => i.formula).length * formulaH };
 }
 
 export function buildReportSvg(input: ReportInput, scale = 1): string {
@@ -121,7 +123,7 @@ export function buildReportSvg(input: ReportInput, scale = 1): string {
 }
 
 /**
- * Renders the report as a 3100×4600 PNG and downloads the original file. PNG is lossless, so text and lines
+ * Renders the report as a 3100×4665 PNG and downloads the original file. PNG is lossless, so text and lines
  * stay sharp; downloading (instead of a share sheet) avoids chat apps shrinking the image. The SVG is sized
  * at the output resolution so the browser draws vectors at full size; 2.5× stays under iPhone's
  * 16.7-megapixel canvas limit.

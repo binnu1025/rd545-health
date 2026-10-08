@@ -18,3 +18,4 @@ a.button{display:inline-flex;align-items:center;justify-content:center;min-heigh
 .marker-line.goal{background:#0b5b4b;width:3px;top:-5px;bottom:-5px}.bar-result .goal-text{color:#0b5b4b;font-weight:650}.bar-result .delta{color:#5d7a70}.trend-chart .goal-line{stroke:#0b5b4b;stroke-width:1.5}.trend-chart .goal-label{fill:#0b5b4b;font-weight:700}
 .tick.goal{top:-17px;color:#0b5b4b;font-weight:700}
 .bar-row:has(.tick.goal){padding-top:24px}
+.bar-formula{grid-column:1/-1;margin:-6px 0 0;padding:6px 10px;background:#f4f8f6;border-radius:6px;font-size:12px;color:#183d38;line-height:1.5}

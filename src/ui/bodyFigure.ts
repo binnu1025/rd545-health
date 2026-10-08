@@ -35,6 +35,12 @@ export function wholeBodyBars(d: BodyComposition, profile: ReportProfile | null,
       肌肉品質: previous.muscleQuality, 代謝年齡: previous.metabolicAge, 肌肉量: previous.muscleMassKg, 四肢肌肉指數: asmi(previous, height), 肌肉評分: previous.muscleScore, 骨量: previous.boneMassKg, 基礎代謝: previous.bmrKcal };
     for (const item of items) item.previous = before[item.label] ?? null;
   }
+  const limbs = (['rightArm', 'leftArm', 'rightLeg', 'leftLeg'] as const).map(k => d.segments[k].muscleKg), asmiItem = items.find(i => i.label === '四肢肌肉指數')!;
+  if (asmiItem.value !== null && height) {
+    const sum = (limbs as number[]).reduce((a, b) => a + b, 0), m = height / 100;
+    asmiItem.formula = `公式：（兩手＋兩腳肌肉 ${sum.toFixed(1)} kg）÷（身高 ${m.toFixed(2)} m × ${m.toFixed(2)} m）＝ ${asmiItem.value.toFixed(2)}；`
+      + (profile ? `低於 ${profile.sex === 'male' ? '7.0（男）' : '5.7（女）'} 就有肌少症風險` : '男性低於 7.0、女性低於 5.7 就有肌少症風險');
+  }
   for (const item of items) {
     if (item.label === '體重') item.goal = goals.weightKg ?? null;
     if (item.label === '體脂率') item.goal = goals.bodyFatPct ?? null;
