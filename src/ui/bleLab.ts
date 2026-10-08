@@ -2,6 +2,7 @@ import { BleProbe } from '../bluetooth/BleProbe';
 import { parseHex, parseServices } from '../bluetooth/packetLogger';
 import { autoReceive, observedServiceUuid } from '../bluetooth/autoReceive';
 import { mountApp } from './app';
+import { buildInfo } from '../buildInfo';
 const esc = (text: string) => text.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 function download(content: string, extension: string) {
   const url = URL.createObjectURL(new Blob([content], {type: extension === 'json' ? 'application/json' : 'text/csv;charset=utf-8'}));
@@ -12,7 +13,7 @@ export function mountBleLab(root: HTMLElement) {
   let receiveErrors: string[] = [];
   const supported = Boolean(navigator.bluetooth); const secure = isSecureContext;
   const platform = /Android/i.test(navigator.userAgent) ? 'Android' : /iPhone|iPad/i.test(navigator.userAgent) || (/Mac/.test(navigator.platform) && navigator.maxTouchPoints > 1) ? 'iOS' : /Win/.test(navigator.platform) ? 'Windows' : /Mac/.test(navigator.platform) ? 'Mac' : navigator.platform;
-  root.innerHTML = `<header><div class="brand">◉ <span>RD-545 <small>HEALTH MANAGER</small></span></div></header>
+  root.innerHTML = `<header><div class="brand">◉ <span>RD-545 <small>HEALTH MANAGER</small></span></div><span class="version" title="版本 ${buildInfo.version}・建置 ${buildInfo.build}・${buildInfo.builtAt}（台北時間）">${buildInfo.version}・${buildInfo.build}</span></header>
     <main><p id="message" role="status" aria-live="polite"></p><details id="devtools" class="devtools"><summary>開發者工具（診斷用，一般使用不需要開啟）</summary><section class="intro"><p class="eyebrow">DEVICE RESEARCH WORKSPACE</p><h1>RD-545 BLE LAB</h1><p>從真實封包開始，驗證每一次連線。</p><div class="notice">尚未完成 RD-545 通訊驗證。本工具不會解碼健康數據，也不會自動發送測量指令。</div></section>
     <section class="card" style="margin-top:24px"><h2>簡易接收</h2><p>先關閉手機 nRF Connect 的連線，讓體脂計處於可連線狀態。</p><button id="auto">一鍵連線並接收</button><p id="receive-state" role="status">選擇設備後，自動探索服務並啟用通知，不必逐個按 Subscribe。</p><p class="hint">已帶入你在 TNT_PAIR 實機觀察到的服務 UUID；尚未確認測量協定。Guest 若需重開機，連線會中斷，請回來再按一次。此功能不會啟動測量或繞過藍牙驗證。</p><details><summary>接收問題詳情</summary><pre id="receive-errors" style="white-space:pre-wrap;overflow-wrap:anywhere">尚無</pre></details></section>
     <section class="environment"><div><small>WEB BLUETOOTH</small><strong>${supported ? 'Supported' : 'Unsupported'}</strong></div><div><small>SECURE CONTEXT</small><strong>${secure ? 'Yes' : 'No'}</strong></div><div><small>PLATFORM</small><strong>${esc(platform)}</strong></div></section>

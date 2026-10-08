@@ -12,3 +12,4 @@ a.button{display:inline-flex;align-items:center;justify-content:center;min-heigh
 @media(prefers-reduced-motion:reduce){.progress li.now::before{animation:none}}
 .figures{display:grid;grid-template-columns:1fr 1fr;gap:12px}.figures figure{margin:0;background:#f8fbf9;border:1px solid #e3ece7;border-radius:12px;padding:10px}.figures figcaption{font-size:13px;font-weight:700;color:#245e4c;margin-bottom:4px}.figures svg{width:100%;height:auto;display:block}.figures .legend{justify-content:center;gap:10px}.figures .legend span{display:inline-flex;align-items:center;gap:4px}.figures .legend i{display:inline-block;width:10px;height:10px;border-radius:2px}@media(max-width:620px){.figures{grid-template-columns:1fr}}
 .person-actions{display:flex;gap:18px;flex-wrap:wrap}
+.version{font-size:11px;color:#8aa298;font-family:Consolas,monospace;letter-spacing:.5px;white-space:nowrap;cursor:help}
