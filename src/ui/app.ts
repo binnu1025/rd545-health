@@ -7,6 +7,7 @@ import { adopt, findOrCreate, findTagged, load, savePerson, saveRecords, saveSet
 import { fromRecord, loadSelectedPerson, saveSelectedPerson, toRecord, type Person } from '../storage/sheetClient';
 import { renderBodyComposition, type ReportProfile } from './bodyFigure';
 import { renderTrend } from './trendChart';
+import { exportReportJpg } from '../report/report';
 
 /**
  * The whole everyday screen as one guided flow:
@@ -193,6 +194,13 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
         const birth = new Date(`${person.出生日期}T00:00:00Z`), height = Number(person.身高cm);
         const profile = isNaN(+birth) || !height ? null : { sex: person.性別, age: ageAt(birth, saved.measuredAt), heightCm: height };
         report.append(renderBodyComposition(saved.detail, `最新一次・${taipeiTime(saved.measuredAt)}`, profile, '試算表人員資料'));
+        const exportBtn = document.createElement('button'); exportBtn.className = 'secondary'; exportBtn.textContent = '輸出報告 JPG';
+        exportBtn.onclick = () => void act(async () => {
+          const history = rows.map(r => fromRecord(r)).filter((x): x is NonNullable<typeof x> => !!x).map(x => ({ at: x.measuredAt, weight: x.detail.weightKg, fat: x.detail.bodyFatPct, muscle: x.detail.muscleMassKg }));
+          const how = await exportReportJpg({ name: person.姓名, profile, measuredAt: saved.measuredAt, detail: saved.detail, history });
+          return how === 'shared' ? '' : '報告已下載。';
+        });
+        report.prepend(exportBtn);
       }
     }
     if (person) report.append(renderTrend(store!.records, person));
