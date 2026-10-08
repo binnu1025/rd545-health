@@ -47,7 +47,7 @@ function bars(items: BarItem[], y: number): { svg: string; height: number } {
   return { svg, height: items.length * rowH };
 }
 
-export function buildReportSvg(input: ReportInput): string {
+export function buildReportSvg(input: ReportInput, scale = 1): string {
   const { detail: d, profile } = input;
   const all = wholeBodyBars(d, profile);
   const pick = (...labels: string[]) => labels.map(l => all.find(b => b.label === l)!).filter(Boolean);
@@ -88,22 +88,28 @@ export function buildReportSvg(input: ReportInput): string {
   const header = `<rect width="${W}" height="140" fill="${brand}"/><text x="50" y="74" font-size="40" font-weight="700" fill="#ffffff">身體組成分析報告</text>`
     + `<text x="52" y="110" font-size="17" fill="#cfe6da">Body Composition Report・RD-545</text>`
     + `<text x="${W - 50}" y="74" text-anchor="end" font-size="22" fill="#ffffff">${xml(taipei(input.measuredAt))}</text>`;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="${font}"><rect width="${W}" height="${H}" fill="#ffffff"/>${header}${out}${footer}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W * scale}" height="${H * scale}" viewBox="0 0 ${W} ${H}" font-family="${font}"><rect width="${W}" height="${H}" fill="#ffffff"/>${header}${out}${footer}</svg>`;
 }
 
-/** Renders the report to a JPG; on phones that can share files it opens the share sheet, otherwise it downloads. */
-export async function exportReportJpg(input: ReportInput): Promise<'shared' | 'downloaded'> {
-  const svg = buildReportSvg(input);
+/**
+ * Renders the report at high resolution and saves it: PNG (lossless, sharpest text) or JPG (smaller).
+ * The SVG itself is sized at the output resolution so the browser draws vectors at full size instead of
+ * enlarging a small bitmap. 2.5× (3100×4385) stays under iPhone's 16.7-megapixel canvas limit.
+ */
+export async function exportReport(input: ReportInput, format: 'png' | 'jpg'): Promise<'shared' | 'downloaded'> {
+  const scale = 2.5, width = Math.round(W * scale), height = Math.round(H * scale);
   const image = new Image();
-  image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(buildReportSvg(input, scale))}`;
   await image.decode();
-  const scale = 2, canvas = document.createElement('canvas');
-  canvas.width = W * scale; canvas.height = H * scale;
+  const canvas = document.createElement('canvas');
+  canvas.width = width; canvas.height = height;
   const ctx = canvas.getContext('2d')!;
-  ctx.scale(scale, scale); ctx.drawImage(image, 0, 0, W, H);
-  const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(b => b ? resolve(b) : reject(Error('無法產生圖片')), 'image/jpeg', 0.92));
-  const name = `體組成報告-${input.name}-${taipei(input.measuredAt, false)}.jpg`.replace(/[\\/:*?"<>|]/g, '_');
-  const file = new File([blob], name, { type: 'image/jpeg' });
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, width, height);
+  ctx.drawImage(image, 0, 0, width, height);
+  const type = format === 'png' ? 'image/png' : 'image/jpeg';
+  const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(b => b ? resolve(b) : reject(Error('無法產生圖片')), type, 0.98));
+  const name = `體組成報告-${input.name}-${taipei(input.measuredAt, false)}.${format}`.replace(/[\/:*?"<>|]/g, '_');
+  const file = new File([blob], name, { type });
   if (navigator.canShare?.({ files: [file] })) {
     try { await navigator.share({ files: [file], title: name }); return 'shared'; }
     catch (e) { if (e instanceof DOMException && e.name === 'AbortError') return 'shared'; }
