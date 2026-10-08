@@ -1,6 +1,9 @@
 import type { BodyComposition } from '../bluetooth/bodyComposition';
 
-/** Spreadsheet connection settings live only in this browser; the token never goes anywhere but the user's own script. */
+/**
+ * Shared row types and the row <-> body-composition mapping. The Apps Script connection below is kept only to
+ * import data from the spreadsheet the app used before Google sign-in.
+ */
 export interface SheetConfig { url: string; token: string }
 export interface Person { id: string; 群組: string; 姓名: string; 性別: 'male' | 'female'; 出生日期: string; 身高cm: string; 體脂計本人: string; 建立時間?: string }
 export type SheetRecord = Record<string, string | number | null>;
@@ -16,13 +19,6 @@ export const saveConfig = (config: SheetConfig | null) => write(configKey, confi
 export const loadSelectedPerson = () => read(selectedKey);
 export const saveSelectedPerson = (id: string | null) => write(selectedKey, id);
 
-export function newToken(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(24));
-  return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
-}
-
-export function isWebAppUrl(url: string) { return /^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(url.trim()); }
-
 async function call<T>(config: SheetConfig, action: string, payload: object = {}): Promise<T> {
   // text/plain keeps this a "simple" request, which Apps Script web apps accept cross-origin without a preflight.
   const response = await fetch(config.url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ token: config.token, action, ...payload }) });
@@ -33,8 +29,6 @@ async function call<T>(config: SheetConfig, action: string, payload: object = {}
 }
 
 export const listAll = (c: SheetConfig) => call<{ people: Person[]; records: SheetRecord[] }>(c, 'list');
-export const savePerson = (c: SheetConfig, person: Partial<Person>) => call<{ person: Person }>(c, 'savePerson', { person });
-export const saveRecord = (c: SheetConfig, record: SheetRecord) => call<{ duplicate: boolean }>(c, 'saveRecord', { record });
 
 /** Rebuilds a saved row for the report, so the latest result shows without touching the scale. */
 export function fromRecord(r: SheetRecord): { measuredAt: Date; detail: BodyComposition } | null {

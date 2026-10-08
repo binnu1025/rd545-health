@@ -30,7 +30,9 @@ export function encodeProbeCommand(command: number, payload: Uint8Array): Uint8A
 }
 /** measure: false = identify only, true = start a new measurement, 'stored' = read results already kept on the scale. */
 export type ScaleResult=ReturnType<typeof decodeExperimentalResult>;
-export async function identifyScale(probe:BleProbe, appUuid:string, measure:boolean|'stored'=false, progress:(text:string)=>void=()=>{}, onResult:(result:ScaleResult,measuredAtText:string,profile:ScaleProfile|null)=>void=()=>{}) {
+export type ScaleStage='verify'|'stand'|'read';
+export interface ScaleHooks{stage?:(stage:ScaleStage)=>void;profile?:(profile:ScaleProfile|null)=>void}
+export async function identifyScale(probe:BleProbe, appUuid:string, measure:boolean|'stored'|'profile'=false, progress:(text:string)=>void=()=>{}, onResult:(result:ScaleResult,measuredAtText:string,profile:ScaleProfile|null)=>void=()=>{}, hooks:ScaleHooks={}) {
   if(!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(appUuid))throw Error('身分檔 UUID 格式錯誤');
   const suffix='-6b90-4779-83b8-b8bf1dadac35';
   const rxKey=observedServiceUuid+'/273e510e'+suffix,txKey=observedServiceUuid+'/273e5107'+suffix;
@@ -54,6 +56,7 @@ export async function identifyScale(probe:BleProbe, appUuid:string, measure:bool
   const session=verifiedSessions.get(probe);
   const alreadyVerified=probe.status==='Connected' && session?.generation===probe.connectionGeneration && session.uuid===appUuid.toLowerCase() && session.rx===rx;
   if(!alreadyVerified) {
+  hooks.stage?.('verify');
   const verified=await request(3,new TextEncoder().encode(appUuid.toLowerCase()));
   if(verified.length!==7||verified[5]!==0)throw Error('設備未接受 App 身分；不會覆寫配對');
   const clockReply=await request(16,encodeTaipeiClock(new Date()));
@@ -66,11 +69,15 @@ export async function identifyScale(probe:BleProbe, appUuid:string, measure:bool
   if(!measure)return '身分驗證與 RD-545AS 型號讀取成功。連線已保留，可直接按「開始測量」，不用中斷。';
   progress('正在讀取設備既有個人資料；不會覆寫設定。');
   const profile=decodeScaleProfile(await request(0x1000,Uint8Array.of(0)));
+  hooks.profile?.(profile);
+  if(measure==='profile')return profile?'已讀取體脂計裡的個人資料。':'已連線，但無法解讀體脂計裡的個人資料。';
   if(measure!=='stored'){
+    hooks.stage?.('stand');
     progress('正在要求設備開始測量。請等體脂計顯示可測量後，依設備提示操作；若資料不是本人，請勿站上。');
     await request(0x2010,Uint8Array.of(0),180000);
+    hooks.stage?.('read');
     progress('設備回報量測完成，正在取得結果…');
-  } else progress('正在讀取體脂計中已存的結果…');
+  } else {hooks.stage?.('read');progress('正在讀取體脂計中已存的結果…');}
   const count=await request(0x3000,Uint8Array.of(0));
   if(count.length!==7)throw Error('測量筆數回覆格式不符，已停止');
   const total=count[5];

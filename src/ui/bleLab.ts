@@ -1,7 +1,7 @@
 import { BleProbe } from '../bluetooth/BleProbe';
 import { parseHex, parseServices } from '../bluetooth/packetLogger';
 import { autoReceive, observedServiceUuid } from '../bluetooth/autoReceive';
-import { mountIdentityTest } from './identityTest';
+import { mountApp } from './app';
 const esc = (text: string) => text.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 function download(content: string, extension: string) {
   const url = URL.createObjectURL(new Blob([content], {type: extension === 'json' ? 'application/json' : 'text/csv;charset=utf-8'}));
@@ -94,6 +94,6 @@ export function mountBleLab(root: HTMLElement) {
   el('copy').onclick = () => void run(async () => { await navigator.clipboard.writeText(probe.logger.packets.map(p => `${p.direction} ${p.payloadHex}`).join('\n')); }, 'HEX 已複製。');
   el('clear').onclick = () => { if (confirm('清除所有封包紀錄？此動作無法復原。')) { probe.logger.clear(); state(); } };
   probe.addEventListener('change', state); state();
-  mountIdentityTest(root.querySelector('main')!,probe,run,services);
+  mountApp(root.querySelector('main')!, probe, run);
   window.addEventListener('pagehide', () => probe.disconnect());
 }

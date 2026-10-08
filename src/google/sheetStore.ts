@@ -1,0 +1,110 @@
+import { googleFetch } from './googleAuth';
+import { peopleHeaders, recordHeaders } from '../storage/schema';
+import type { Person, SheetRecord } from '../storage/sheetClient';
+
+/**
+ * The account's own spreadsheet in Google Drive, reached with the signed-in user's token.
+ * Tabs: 人員 (people, plain text), 量測紀錄 (one row per measurement), 設定 (key/value, e.g. the scale identity).
+ */
+const sheetsApi = 'https://sheets.googleapis.com/v4/spreadsheets';
+const driveApi = 'https://www.googleapis.com/drive/v3/files';
+const tag = { key: 'rd545', value: 'health' };
+const PEOPLE = '人員', RECORDS = '量測紀錄', SETTINGS = '設定';
+const settingsHeaders = ['項目', '值'] as const;
+const dateColumns = new Set(['量測時間', '寫入時間']);
+// Sheets serial dates count days from 1899-12-30 in the spreadsheet's time zone, which we create as Asia/Taipei.
+const taipeiMs = 8 * 3600000;
+const toSerial = (iso: string) => (Date.parse(iso) + taipeiMs) / 86400000 + 25569;
+// Day fractions lose a millisecond to floating point; scale times are whole seconds, so round to the second.
+const fromSerial = (serial: number) => new Date(Math.round(((serial - 25569) * 86400000 - taipeiMs) / 1000) * 1000).toISOString();
+
+type Fetch = typeof googleFetch;
+export interface Store {
+  spreadsheetId: string;
+  people: Person[];
+  records: SheetRecord[];
+  settings: Record<string, string>;
+}
+
+const q = (s: string) => encodeURIComponent(s);
+const range = (tab: string) => q(`'${tab}'`);
+
+export async function findOrCreate(api: Fetch = googleFetch): Promise<string> {
+  const query = `appProperties has { key='${tag.key}' and value='${tag.value}' } and trashed=false`;
+  const found = await api<{ files: { id: string }[] }>(`${driveApi}?q=${q(query)}&fields=files(id)&spaces=drive`);
+  if (found.files.length) return found.files[0].id;
+  const created = await api<{ spreadsheetId: string; sheets: { properties: { sheetId: number; title: string } }[] }>(sheetsApi, { method: 'POST', body: JSON.stringify({
+    properties: { title: 'RD-545 體組成紀錄', timeZone: 'Asia/Taipei', locale: 'zh_TW' },
+    sheets: [PEOPLE, RECORDS, SETTINGS].map(title => ({ properties: { title, gridProperties: { frozenRowCount: 1 } } })),
+  }) });
+  const id = created.spreadsheetId;
+  await api(`${sheetsApi}/${id}/values:batchUpdate`, { method: 'POST', body: JSON.stringify({ valueInputOption: 'RAW', data: [
+    { range: `'${PEOPLE}'!A1`, values: [[...peopleHeaders]] }, { range: `'${RECORDS}'!A1`, values: [[...recordHeaders]] }, { range: `'${SETTINGS}'!A1`, values: [[...settingsHeaders]] },
+  ] }) });
+  // Show the two time columns as dates in Taipei time (values are Sheets serial numbers).
+  const recordsSheet = created.sheets.find(x => x.properties.title === RECORDS)!.properties.sheetId;
+  await api(`${sheetsApi}/${id}:batchUpdate`, { method: 'POST', body: JSON.stringify({ requests: ['量測時間', '寫入時間'].map(h => recordHeaders.indexOf(h as never)).map(col => ({ repeatCell: {
+    range: { sheetId: recordsSheet, startRowIndex: 1, startColumnIndex: col, endColumnIndex: col + 1 },
+    cell: { userEnteredFormat: { numberFormat: { type: 'DATE_TIME', pattern: 'yyyy-mm-dd hh:mm:ss' } } }, fields: 'userEnteredFormat.numberFormat' } })) }) });
+  // The private tag lets other devices on the same account find this exact file again.
+  await api(`${driveApi}/${id}`, { method: 'PATCH', body: JSON.stringify({ appProperties: { [tag.key]: tag.value } }) });
+  return id;
+}
+
+function toObjects(values: unknown[][] | undefined): Record<string, unknown>[] {
+  if (!values?.length) return [];
+  const [head, ...rows] = values as string[][];
+  return rows.map(row => Object.fromEntries(head.map((h, i) => [h, dateColumns.has(h) && typeof row[i] === 'number' ? fromSerial(row[i] as unknown as number) : row[i] ?? ''])));
+}
+
+export async function load(spreadsheetId: string, api: Fetch = googleFetch): Promise<Store> {
+  const ranges = [PEOPLE, RECORDS, SETTINGS].map(t => `ranges=${range(t)}`).join('&');
+  const data = await api<{ valueRanges: { values?: unknown[][] }[] }>(`${sheetsApi}/${spreadsheetId}/values:batchGet?${ranges}&valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER`);
+  const [people, records, settings] = data.valueRanges.map(v => toObjects(v.values));
+  return {
+    spreadsheetId,
+    people: people.filter(p => p['id']).map(p => Object.fromEntries(Object.entries(p).map(([k, v]) => [k, String(v)])) as unknown as Person),
+    records: records as SheetRecord[],
+    settings: Object.fromEntries(settings.filter(s => s['項目']).map(s => [String(s['項目']), String(s['值'])])),
+  };
+}
+
+async function append(api: Fetch, id: string, tab: string, rows: unknown[][], input: 'RAW' | 'USER_ENTERED' = 'RAW') {
+  await api(`${sheetsApi}/${id}/values/${range(tab)}:append?valueInputOption=${input}&insertDataOption=INSERT_ROWS`, { method: 'POST', body: JSON.stringify({ values: rows }) });
+}
+
+export async function savePerson(store: Store, person: Partial<Person>, api: Fetch = googleFetch): Promise<Person> {
+  const saved = { ...person, id: person.id || crypto.randomUUID(), 建立時間: person.建立時間 || new Date().toISOString() } as Person;
+  const row = peopleHeaders.map(h => String((saved as unknown as Record<string, unknown>)[h] ?? ''));
+  const index = store.people.findIndex(p => p.id === saved.id);
+  if (index >= 0) {
+    await api(`${sheetsApi}/${store.spreadsheetId}/values/${q(`'${PEOPLE}'!A${index + 2}`)}?valueInputOption=RAW`, { method: 'PUT', body: JSON.stringify({ values: [row] }) });
+    store.people[index] = saved;
+  } else { await append(api, store.spreadsheetId, PEOPLE, [row]); store.people.push(saved); }
+  return saved;
+}
+
+/** Appends unless a row with the same key exists; dates go in as real date cells so the sheet can chart them. */
+export async function saveRecords(store: Store, records: SheetRecord[], api: Fetch = googleFetch): Promise<number> {
+  const known = new Set(store.records.map(r => String(r['紀錄鍵'])));
+  const fresh = records.filter(r => !known.has(String(r['紀錄鍵'])));
+  if (!fresh.length) return 0;
+  const now = new Date().toISOString();
+  await append(api, store.spreadsheetId, RECORDS, fresh.map(r => recordHeaders.map(h => {
+    const v = h === '寫入時間' ? now : r[h];
+    return dateColumns.has(h) && typeof v === 'string' ? toSerial(v) : v ?? '';
+  })));
+  store.records.push(...fresh.map(r => ({ ...r, 寫入時間: now })));
+  return fresh.length;
+}
+
+export async function saveSetting(store: Store, key: string, value: string, api: Fetch = googleFetch) {
+  if (store.settings[key] === value) return;
+  if (key in store.settings) {
+    const row = Object.keys(store.settings).indexOf(key) + 2;
+    await api(`${sheetsApi}/${store.spreadsheetId}/values/${q(`'${SETTINGS}'!A${row}`)}?valueInputOption=RAW`, { method: 'PUT', body: JSON.stringify({ values: [[key, value]] }) });
+  } else await append(api, store.spreadsheetId, SETTINGS, [[key, value]]);
+  store.settings[key] = value;
+}
+
+export const spreadsheetUrl = (id: string) => `https://docs.google.com/spreadsheets/d/${id}/edit`;
