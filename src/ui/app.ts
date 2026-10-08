@@ -50,7 +50,9 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
       let id = local.get(sheetIdKey(email));
       try { if (!id) throw Error(); store = await load(id); }
       catch { id = await findOrCreate(); local.set(sheetIdKey(email), id); store = await load(id); }
-      uuid = store.settings[identityKey] || uuid;
+      // A device set up with the old setup code still remembers the identity: adopt it instead of asking for the file.
+      const legacyIdentity = local.get('rd545.identity');
+      uuid = store.settings[identityKey] || uuid || (legacyIdentity && uuidPattern.test(legacyIdentity) ? legacyIdentity.toLowerCase() : '');
       if (uuid && !store.settings[identityKey]) await saveSetting(store, identityKey, uuid);
       if (!selected()) { selectedId = owner()?.id ?? people()[0]?.id ?? null; saveSelectedPerson(selectedId); }
       message = '';
