@@ -38,7 +38,7 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
   const section = document.createElement('section');
   section.className = 'card app';
   root.prepend(section);
-  let store: Store | null = null, needIdentity = false, uuid = '', selectedId = loadSelectedPerson(), message = '', busy = false;
+  let store: Store | null = null, needIdentity = false, askFamilyConsent = false, uuid = '', selectedId = loadSelectedPerson(), message = '', busy = false;
   let scaleProfile: ScaleProfile | null = null, stage: string | null = null, fresh: HTMLElement | null = null;
   const people = () => store?.people ?? [];
   const selected = () => people().find(p => p.id === selectedId) ?? null;
@@ -94,8 +94,9 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
     return run(async () => {
       busy = true; message = ''; stage = 'connect'; render();
       try {
-        await keepIdentity().catch(() => { /* saving is retried next time; measuring does not depend on it */ });
+        // Chrome only opens the Bluetooth chooser within a few seconds of the tap, so connect before anything that waits.
         if (probe.status !== 'Connected') await probe.connect([observedServiceUuid], scaleNamePrefix);
+        await keepIdentity().catch(() => { /* saving is retried next time; measuring does not depend on it */ });
         if (!probe.characteristics.size) await probe.enumerate();
         const person = selected(), family = mode === true && person && !isOwner(person) ? person : null;
         const text = await identifyScale(probe, uuid, mode, t => { message = t; render(); }, (result, when, profile) => {
@@ -173,6 +174,7 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
       ${people().length && hasBluetooth ? `<button class="big measure" data-act="measure" ${busy || !canMeasure ? 'disabled' : ''}>開始量測</button>
       ${person && !isOwner(person) && canMeasure ? `<p class="hint">替 ${esc(person.姓名)} 量測時，會把他的生日、性別、身高暫時寫入體脂計，量完自動改回你的資料。</p>` : ''}
       ${canMeasure && !busy ? '<p class="hint">先輕踩一下體脂計，讓螢幕亮起來（體脂計休眠時藍牙找不到它），再按「開始量測」。</p>' : ''}
+      ${askFamilyConsent && person && !isOwner(person) ? `<div class="import"><h3>替 ${esc(person.姓名)} 量測</h3><p class="hint">體脂計會用存在機器裡的生日、性別、身高計算。網頁會把 ${esc(person.姓名)} 的這三項暫時寫入體脂計，量完自動改回你的資料，並核對確實改回。這個說明只會出現一次。</p><div class="actions"><button data-act="family-ok">我了解，開始替 ${esc(person.姓名)} 量測</button><button class="quiet" data-act="family-cancel">取消</button></div></div>` : ''}
       ${needIdentity && !uuid ? identityBox() : ''}${progress()}<p role="status">${esc(message)}</p>
       ${isOwner(person) ? `<button class="link" data-act="sync" ${busy ? 'disabled' : ''}>已經在體脂計上量過了？只同步結果</button>` : ''}` : `${progress()}<p role="status">${esc(message)}</p>`}
       <div class="report"></div>
@@ -181,7 +183,7 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
         <button class="secondary" data-act="refresh">重新整理</button>
         <button class="secondary" data-act="switch-sheet">改用其他試算表</button>
         <button class="quiet" data-act="signout">登出</button></div></details>`;
-    section.querySelector<HTMLSelectElement>('[data-field=person]')?.addEventListener('change', e => { selectedId = (e.target as HTMLSelectElement).value; saveSelectedPerson(selectedId); fresh = null; message = ''; render(); });
+    section.querySelector<HTMLSelectElement>('[data-field=person]')?.addEventListener('change', e => { selectedId = (e.target as HTMLSelectElement).value; saveSelectedPerson(selectedId); fresh = null; message = ''; askFamilyConsent = false; render(); });
     const toggle = (form: string) => () => { const f = section.querySelector<HTMLFormElement>(`[data-form=${form}]`)!; f.hidden = !f.hidden; };
     on('add', toggle('member'));
     on('edit', toggle('edit'));
@@ -192,12 +194,11 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
     // The scale is only needed when measuring; without an identity yet, ask for it right here.
     const needsScale = (go: () => void) => () => { if (!uuid) { needIdentity = true; message = ''; render(); return; } go(); };
     on('measure', needsScale(() => {
-      if (person && !isOwner(person) && local.get(familyConsentKey) !== '1') {
-        if (!confirm(`替 ${person.姓名} 量測時，會把他的生日、性別、身高暫時寫入體脂計，量完自動改回你的資料。要繼續嗎？`)) return;
-        local.set(familyConsentKey, '1');
-      }
+      if (person && !isOwner(person) && local.get(familyConsentKey) !== '1') { askFamilyConsent = true; render(); return; }
       void useScale(true, '量測完成。');
     }));
+    on('family-ok', () => { local.set(familyConsentKey, '1'); askFamilyConsent = false; void useScale(true, '量測完成。'); });
+    on('family-cancel', () => { askFamilyConsent = false; render(); });
     on('sync', needsScale(() => void useScale('stored', '已同步體脂計的結果。')));
     on('profile', () => void useScale('profile', '已讀取體脂計資料。'));
     on('refresh', () => void act(async () => { store = await load(store!.spreadsheetId); await keepIdentity(); }));
