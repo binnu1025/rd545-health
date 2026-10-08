@@ -62,9 +62,15 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
     local.set(sheetIdKey(signedInEmail()), id);
     // A device set up with the old setup code still remembers the identity: adopt it instead of asking for the file.
     const legacyIdentity = local.get('rd545.identity');
-    uuid = store.settings[identityKey] || uuid || (legacyIdentity && uuidPattern.test(legacyIdentity) ? legacyIdentity.toLowerCase() : '');
-    if (uuid && !store.settings[identityKey]) await saveSetting(store, identityKey, uuid);
+    if (!uuid && legacyIdentity && uuidPattern.test(legacyIdentity)) uuid = legacyIdentity.toLowerCase();
+    await keepIdentity();
     if (!selected()) { selectedId = owner()?.id ?? people()[0]?.id ?? null; saveSelectedPerson(selectedId); }
+  }
+  /** The spreadsheet is the one place every device reads the scale identity from: take it from there, or put ours there. */
+  async function keepIdentity() {
+    if (!store) return;
+    if (store.settings[identityKey]) uuid = store.settings[identityKey];
+    else if (uuid) await saveSetting(store, identityKey, uuid);
   }
   function chooseView() {
     section.innerHTML = `<h2>你的試算表</h2>
@@ -92,6 +98,7 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
     return run(async () => {
       busy = true; message = ''; stage = 'connect'; render();
       try {
+        await keepIdentity().catch(() => { /* saving is retried next time; measuring does not depend on it */ });
         if (probe.status !== 'Connected') await probe.connect([observedServiceUuid], scaleNamePrefix);
         if (!probe.characteristics.size) await probe.enumerate();
         const text = await identifyScale(probe, uuid, mode, t => { message = t; render(); }, (result, when, profile) => {
@@ -165,6 +172,7 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
       ${picker}
       ${people().length ? `<button class="big measure" data-act="measure" ${busy || !canMeasure ? 'disabled' : ''}>開始量測</button>
       ${!canMeasure && person ? `<p class="warn">${esc(person.姓名)} 的量測還不能用：體脂計目前只會用本人的身高、年齡、性別計算。替家人量測的功能開發中。</p>` : ''}
+      ${canMeasure && !busy ? '<p class="hint">先輕踩一下體脂計，讓螢幕亮起來（體脂計休眠時藍牙找不到它），再按「開始量測」。</p>' : ''}
       ${needIdentity && !uuid ? identityBox() : ''}${progress()}<p role="status">${esc(message)}</p>
       ${canMeasure ? `<button class="link" data-act="sync" ${busy ? 'disabled' : ''}>已經在體脂計上量過了？只同步結果</button>` : ''}` : `${progress()}<p role="status">${esc(message)}</p>`}
       <div class="report"></div>
@@ -182,7 +190,7 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
     on('measure', needsScale(() => void useScale(true, '量測完成。')));
     on('sync', needsScale(() => void useScale('stored', '已同步體脂計的結果。')));
     on('profile', () => void useScale('profile', '已讀取體脂計資料。'));
-    on('refresh', () => void act(async () => { store = await load(store!.spreadsheetId); }));
+    on('refresh', () => void act(async () => { store = await load(store!.spreadsheetId); await keepIdentity(); }));
     on('signout', () => { signOut(); store = null; fresh = null; message = '已登出。'; render(); });
     // Result area: a fresh reading from this visit, otherwise the newest saved row; then the trend.
     const report = section.querySelector<HTMLElement>('.report')!;

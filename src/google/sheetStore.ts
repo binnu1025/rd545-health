@@ -56,13 +56,23 @@ function toObjects(values: unknown[][] | undefined): Record<string, unknown>[] {
   return rows.map(row => Object.fromEntries(head.map((h, i) => [h, dateColumns.has(h) && typeof row[i] === 'number' ? fromSerial(row[i] as unknown as number) : row[i] ?? ''])));
 }
 
+/**
+ * Birth dates may be text ("1990-01-01", "1990/1/1") or, in sheets made by the earlier Apps Script, a real
+ * date cell that arrives as a serial day number. Normalise to yyyy-mm-dd so age can be computed.
+ */
+export function birthDate(v: unknown): string {
+  if (typeof v === 'number' && isFinite(v)) return new Date(Math.round((v - 25569) * 86400000)).toISOString().slice(0, 10);
+  const m = String(v ?? '').trim().match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  return m ? `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}` : String(v ?? '');
+}
+
 export async function load(spreadsheetId: string, api: Fetch = googleFetch): Promise<Store> {
   const ranges = [PEOPLE, RECORDS, SETTINGS].map(t => `ranges=${range(t)}`).join('&');
   const data = await api<{ valueRanges: { values?: unknown[][] }[] }>(`${sheetsApi}/${spreadsheetId}/values:batchGet?${ranges}&valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER`);
   const [people, records, settings] = data.valueRanges.map(v => toObjects(v.values));
   return {
     spreadsheetId,
-    people: people.filter(p => p['id']).map(p => Object.fromEntries(Object.entries(p).map(([k, v]) => [k, String(v)])) as unknown as Person),
+    people: people.filter(p => p['id']).map(p => Object.fromEntries(Object.entries(p).map(([k, v]) => [k, k === '出生日期' ? birthDate(v) : String(v)])) as unknown as Person),
     records: records as SheetRecord[],
     settings: Object.fromEntries(settings.filter(s => s['項目']).map(s => [String(s['項目']), String(s['值'])])),
   };

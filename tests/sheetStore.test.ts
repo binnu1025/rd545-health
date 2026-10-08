@@ -88,3 +88,10 @@ it('adopts a spreadsheet the user already had without touching its rows', async 
   await untag('old-empty', g.api);
   expect(g.patched).toEqual(['health', null]);
 });
+it('reads birth dates stored as text or as a Sheets date number', async () => {
+  const { birthDate } = await import('../src/google/sheetStore');
+  expect(birthDate(32878)).toBe('1990-01-05');       // date cell from the earlier Apps Script sheet
+  expect(birthDate('1990/1/5')).toBe('1990-01-05');
+  expect(birthDate('1990-01-05')).toBe('1990-01-05');
+  expect(birthDate('')).toBe('');
+});
