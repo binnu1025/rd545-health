@@ -10,12 +10,12 @@ const consentKey='rd545.ownerConsent';
 const loadConsent=()=>{try{return localStorage.getItem(consentKey)==='1';}catch{return false;}};
 const rememberConsent=(v:boolean)=>{try{if(v)localStorage.setItem(consentKey,'1');else localStorage.removeItem(consentKey);}catch{/* visit-only */}};
 export function mountIdentityTest(root:HTMLElement,probe:BleProbe,run:(op:()=>Promise<void>,success:string)=>Promise<void>,render:()=>void){
-  const section=document.createElement('section');section.className='card';
-  section.innerHTML='<h2>實驗：驗證身分與讀取型號</h2><p>匯入這台設備的私人身分檔後，按一次測試。依序驗證既有 App UUID、同步目前台北時間、讀取型號。不修改個人設定或啟動測量。</p><label>私人身分檔<input type="file" accept=".json"></label><button disabled>同步時間並驗證型號</button><p role="status">尚未載入身分檔。檔案僅留在記憶體，重新整理後清除。</p>';
+  const section=document.createElement('section');section.className='card identity';
+  section.innerHTML='<h2>體脂計身分</h2><p class="hint">網頁用這個身分向體脂計證明是你的手機或電腦。電腦每次打開網頁載入一次；手機貼過設定碼就不用。</p><label>身分檔（identity-probe.json）<input type="file" accept=".json"></label><p role="status">尚未載入身分檔。檔案只留在這個分頁的記憶體，重新整理後清除。</p><details class="advanced"><summary>進階：手動測試</summary><button disabled>同步時間並驗證型號</button></details>';
   root.prepend(section);let uuid=loadRememberedUuid()??'';const people=mountPeoplePanel(root,()=>uuid);const input=section.querySelector('input')!,button=section.querySelector('button')!,status=section.querySelector<HTMLElement>('[role=status]')!;
   // A phone that imported a setup code remembers the identity, so no file is needed there.
   if(uuid){button.disabled=false;status.textContent='已使用這台裝置記住的身分（來自手機設定碼），不需載入身分檔。';const forget=document.createElement('button');forget.className='quiet';forget.textContent='清除這台裝置記住的身分';forget.onclick=()=>{if(!confirm('清除後需要重新貼設定碼或載入身分檔才能連線。要繼續嗎？'))return;rememberUuid(null);uuid='';button.disabled=true;forget.remove();status.textContent='已清除。請載入身分檔或重新貼設定碼。';};status.after(forget);}
-  input.onchange=async()=>{uuid='';button.disabled=true;try{const file=input.files?.[0];if(!file)return;if(file.size>2048)throw Error('請選擇小型私人身分檔，非診斷壓縮檔');const data=JSON.parse(await file.text());if(data.purpose!=='RD545_IDENTITY_PROBE'||typeof data.appUuid!=='string'||!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(data.appUuid))throw Error('身分檔格式錯誤');uuid=data.appUuid;button.disabled=false;status.textContent='身分檔已載入。請中斷手機 App 的藍牙連線，再按測試。';}catch(e){status.textContent=String(e);}};
+  input.onchange=async()=>{uuid='';button.disabled=true;try{const file=input.files?.[0];if(!file)return;if(file.size>2048)throw Error('請選擇小型私人身分檔，非診斷壓縮檔');const data=JSON.parse(await file.text());if(data.purpose!=='RD545_IDENTITY_PROBE'||typeof data.appUuid!=='string'||!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(data.appUuid))throw Error('身分檔格式錯誤');uuid=data.appUuid;button.disabled=false;say('身分檔已載入。按上方「一鍵讀取最新結果」即可。');}catch(e){status.textContent=String(e);}};
   button.onclick=()=>void run(async()=>{button.disabled=true;status.textContent='正在測試，請等待…';try{if(probe.status!=='Connected')await probe.connect([observedServiceUuid],scaleNamePrefix);if(!probe.characteristics.size)await probe.enumerate();status.textContent=await identifyScale(probe,uuid);}catch(e){status.textContent=String(e);throw e;}finally{button.disabled=!uuid;render();}},'型號測試完成，請查看頁面最上方結果。');
   const consent=document.createElement('label'),checkbox=document.createElement('input');checkbox.type='checkbox';checkbox.style.width='auto';
   consent.append(checkbox,document.createTextNode(' 我是目前设备個人資料的本人，使用既有設定進行實驗測量（非 Guest）。'));
@@ -32,7 +32,7 @@ export function mountIdentityTest(root:HTMLElement,probe:BleProbe,run:(op:()=>Pr
   quickStatus.textContent=uuid?'體脂計待機即可，按一下就會連線並讀取。':'請先在下方載入身分檔，或在手機貼上設定碼。';
   const quickActions=document.createElement('div');quickActions.className='actions';quickActions.append(quickRead,quickMeasure);
   quick.append(quickActions,quickStatus,report);root.prepend(quick);
-  status.style.whiteSpace='pre-wrap';section.append(consent,measure,stored,note);
+  status.style.whiteSpace='pre-wrap';section.querySelector('.advanced')!.append(consent,measure,stored,note);
   // Failures keep the connection: disconnecting powers the scale off and its stored results would need a new session.
   const say=(text:string)=>{status.textContent=text;quickStatus.textContent=text;};
   const start=(mode:true|'stored')=>{

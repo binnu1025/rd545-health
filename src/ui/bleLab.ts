@@ -12,17 +12,19 @@ export function mountBleLab(root: HTMLElement) {
   let receiveErrors: string[] = [];
   const supported = Boolean(navigator.bluetooth); const secure = isSecureContext;
   const platform = /Android/i.test(navigator.userAgent) ? 'Android' : /iPhone|iPad/i.test(navigator.userAgent) || (/Mac/.test(navigator.platform) && navigator.maxTouchPoints > 1) ? 'iOS' : /Win/.test(navigator.platform) ? 'Windows' : /Mac/.test(navigator.platform) ? 'Mac' : navigator.platform;
-  root.innerHTML = `<header><div class="brand">◉ <span>RD-545 <small>HEALTH MANAGER</small></span></div><span class="badge">PHASE 01 · 實驗功能</span></header>
-    <main><section class="intro"><p class="eyebrow">DEVICE RESEARCH WORKSPACE</p><h1>RD-545 BLE LAB</h1><p>從真實封包開始，驗證每一次連線。</p><div class="notice">尚未完成 RD-545 通訊驗證。本工具不會解碼健康數據，也不會自動發送測量指令。</div></section>
+  root.innerHTML = `<header><div class="brand">◉ <span>RD-545 <small>HEALTH MANAGER</small></span></div></header>
+    <main><p id="message" role="status" aria-live="polite"></p><details id="devtools" class="devtools"><summary>開發者工具（診斷用，一般使用不需要開啟）</summary><section class="intro"><p class="eyebrow">DEVICE RESEARCH WORKSPACE</p><h1>RD-545 BLE LAB</h1><p>從真實封包開始，驗證每一次連線。</p><div class="notice">尚未完成 RD-545 通訊驗證。本工具不會解碼健康數據，也不會自動發送測量指令。</div></section>
     <section class="card" style="margin-top:24px"><h2>簡易接收</h2><p>先關閉手機 nRF Connect 的連線，讓體脂計處於可連線狀態。</p><button id="auto">一鍵連線並接收</button><p id="receive-state" role="status">選擇設備後，自動探索服務並啟用通知，不必逐個按 Subscribe。</p><p class="hint">已帶入你在 TNT_PAIR 實機觀察到的服務 UUID；尚未確認測量協定。Guest 若需重開機，連線會中斷，請回來再按一次。此功能不會啟動測量或繞過藍牙驗證。</p><details><summary>接收問題詳情</summary><pre id="receive-errors" style="white-space:pre-wrap;overflow-wrap:anywhere">尚無</pre></details></section>
     <section class="environment"><div><small>WEB BLUETOOTH</small><strong>${supported ? 'Supported' : 'Unsupported'}</strong></div><div><small>SECURE CONTEXT</small><strong>${secure ? 'Yes' : 'No'}</strong></div><div><small>PLATFORM</small><strong>${esc(platform)}</strong></div></section>
     <div class="workspace"><div><section class="card"><h2><span>01</span> 設備連線</h2><label for="uuids">已確認的 Service UUID（選填）</label><textarea id="uuids" rows="3" placeholder="從實機工具或 HCI 紀錄取得，每行一筆完整 UUID"></textarea><p class="hint">未填仍可選擇設備及嘗試連線，但無法完整探索服務。新增 UUID 後需重新搜尋，授權才會生效。</p><div class="actions"><button id="connect" ${!supported || !secure ? 'disabled' : ''}>搜尋藍牙設備</button><button id="disconnect" class="secondary" disabled>中斷連線</button></div><div id="connection"></div></section>
     <section class="card"><div class="heading"><h2><span>02</span> GATT 服務</h2><button id="enumerate" class="secondary" disabled>探索服務</button></div><p class="hint">僅顯示瀏覽器已授權的服務，不代表設備的完整服務列表。</p><div id="services" class="empty">連線後，點選「探索服務」。</div></section></div>
     <section class="card log-card"><div class="heading"><h2><span>03</span> 封包紀錄</h2><span id="count" class="badge">0 packets</span></div><p class="hint">RX：讀取／通知 · TX：寫入成功後記錄<br>時間以 Asia/Taipei 顯示；匯出使用 ISO UTC。</p><div class="actions"><button id="json" class="secondary">Export JSON</button><button id="csv" class="secondary">Export CSV</button><button id="copy" class="secondary">Copy HEX</button><button id="clear" class="quiet">Clear Log</button></div><div id="packets" class="packets empty">尚無封包。此處只顯示實際讀寫資料。</div><p class="hint">畫面顯示最近 100 筆，記憶體最多保留 10,000 筆。匯出包含设备識別與原始封包，分享前請檢查內容。</p></section></div>
-    <p id="message" role="status" aria-live="polite">準備就緒。請先確認體組成計可被搜尋。</p><footer>本階段資料只存在本頁記憶體；重新整理即清除。沒有 Google 登入或雲端上傳。</footer></main>`;
+    <footer>診斷工具的封包只存在本頁記憶體；重新整理即清除，不會上傳。</footer></details></main>`;
   const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
   el<HTMLTextAreaElement>('uuids').value = observedServiceUuid;
-  const message = (text: string, error = false) => { el('message').textContent = text; el('message').classList.toggle('error', error); };
+  // Toast: errors stay until the next action, other messages fade after a few seconds; empty = hidden.
+  let messageTimer = 0;
+  const message = (text: string, error = false) => { clearTimeout(messageTimer); el('message').textContent = text; el('message').classList.toggle('error', error); if (!error) messageTimer = window.setTimeout(() => { el('message').textContent = ''; }, 4000); };
   function state() {
     el('connection').innerHTML = `<p class="status"><i class="${probe.status === 'Connected' ? 'online' : ''}"></i>${probe.status}</p><dl><dt>設備名稱</dt><dd>${esc(probe.device?.name || '—')}</dd><dt>設備 ID</dt><dd>${esc(probe.device?.id || '—')}</dd></dl>`;
     el<HTMLButtonElement>('connect').disabled = busy || !supported || !secure;
