@@ -92,11 +92,12 @@ export function buildReportSvg(input: ReportInput, scale = 1): string {
 }
 
 /**
- * Renders the report at high resolution and saves it: PNG (lossless, sharpest text) or JPG (smaller).
- * The SVG itself is sized at the output resolution so the browser draws vectors at full size instead of
- * enlarging a small bitmap. 2.5× (3100×4385) stays under iPhone's 16.7-megapixel canvas limit.
+ * Renders the report as a 3100×4385 PNG and downloads the original file. PNG is lossless, so text and lines
+ * stay sharp; downloading (instead of a share sheet) avoids chat apps shrinking the image. The SVG is sized
+ * at the output resolution so the browser draws vectors at full size; 2.5× stays under iPhone's
+ * 16.7-megapixel canvas limit.
  */
-export async function exportReport(input: ReportInput, format: 'png' | 'jpg'): Promise<'shared' | 'downloaded'> {
+export async function exportReport(input: ReportInput): Promise<{ name: string; width: number; height: number; bytes: number }> {
   const scale = 2.5, width = Math.round(W * scale), height = Math.round(H * scale);
   const image = new Image();
   image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(buildReportSvg(input, scale))}`;
@@ -106,16 +107,10 @@ export async function exportReport(input: ReportInput, format: 'png' | 'jpg'): P
   const ctx = canvas.getContext('2d')!;
   ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, width, height);
   ctx.drawImage(image, 0, 0, width, height);
-  const type = format === 'png' ? 'image/png' : 'image/jpeg';
-  const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(b => b ? resolve(b) : reject(Error('無法產生圖片')), type, 0.98));
-  const name = `體組成報告-${input.name}-${taipei(input.measuredAt, false)}.${format}`.replace(/[\/:*?"<>|]/g, '_');
-  const file = new File([blob], name, { type });
-  if (navigator.canShare?.({ files: [file] })) {
-    try { await navigator.share({ files: [file], title: name }); return 'shared'; }
-    catch (e) { if (e instanceof DOMException && e.name === 'AbortError') return 'shared'; }
-  }
+  const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(b => b ? resolve(b) : reject(Error('無法產生圖片')), 'image/png'));
+  const name = `體組成報告-${input.name}-${taipei(input.measuredAt, false)}.png`.replace(/[\/:*?"<>|]/g, '_');
   const url = URL.createObjectURL(blob), link = document.createElement('a');
   link.href = url; link.download = name; link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 2000);
-  return 'downloaded';
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  return { name, width, height, bytes: blob.size };
 }

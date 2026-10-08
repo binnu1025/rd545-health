@@ -194,17 +194,13 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
         const birth = new Date(`${person.出生日期}T00:00:00Z`), height = Number(person.身高cm);
         const profile = isNaN(+birth) || !height ? null : { sex: person.性別, age: ageAt(birth, saved.measuredAt), heightCm: height };
         report.append(renderBodyComposition(saved.detail, `最新一次・${taipeiTime(saved.measuredAt)}`, profile, '試算表人員資料'));
-        const exportBar = document.createElement('div'); exportBar.className = 'actions export';
-        for (const [format, label] of [['png', '輸出報告 PNG（最清晰）'], ['jpg', '輸出 JPG（檔案較小）']] as const) {
-          const btn = document.createElement('button'); btn.className = 'secondary'; btn.textContent = label;
-          btn.onclick = () => void act(async () => {
-            const history = rows.map(r => fromRecord(r)).filter((x): x is NonNullable<typeof x> => !!x).map(x => ({ at: x.measuredAt, weight: x.detail.weightKg, fat: x.detail.bodyFatPct, muscle: x.detail.muscleMassKg }));
-            const how = await exportReport({ name: person.姓名, profile, measuredAt: saved.measuredAt, detail: saved.detail, history }, format);
-            return how === 'shared' ? '' : '報告已下載。';
-          });
-          exportBar.append(btn);
-        }
-        report.prepend(exportBar);
+        const exportBtn = document.createElement('button'); exportBtn.className = 'secondary'; exportBtn.textContent = '輸出報告圖片';
+        exportBtn.onclick = () => void act(async () => {
+          const history = rows.map(r => fromRecord(r)).filter((x): x is NonNullable<typeof x> => !!x).map(x => ({ at: x.measuredAt, weight: x.detail.weightKg, fat: x.detail.bodyFatPct, muscle: x.detail.muscleMassKg }));
+          const out = await exportReport({ name: person.姓名, profile, measuredAt: saved.measuredAt, detail: saved.detail, history });
+          return `已下載「${out.name}」（${out.width}×${out.height}，${(out.bytes / 1048576).toFixed(1)} MB）。請從「下載」資料夾開啟原檔；傳給別人時請選「原圖」或以檔案傳送，避免被壓縮。`;
+        });
+        report.prepend(exportBtn);
       }
     }
     if (person) report.append(renderTrend(store!.records, person));
