@@ -38,10 +38,11 @@ export function mountPeoplePanel(root: HTMLElement, currentUuid: () => string): 
     let token = readPending();
     if (!token) { token = newToken(); writePending(token); }
     section.innerHTML = `<h2>測量者與 Google 試算表</h2>
-      <details class="import" open><summary>已經在電腦設定好了？（手機用這個）</summary>
-        <p class="hint">在電腦的網頁按「顯示手機設定 QR 碼」，用手機相機掃描、複製文字後貼在這裡。</p>
-        <textarea data-field="code" rows="3" placeholder="RD545SETUP1:…"></textarea><button data-act="import">套用設定碼</button></details>
-      <p class="hint">第一次使用需要設定一次（約 5 分鐘）。量測紀錄會存在你自己的 Google 帳號。</p>
+      <div class="import"><h3>已經有試算表了：貼上設定碼</h3>
+        <p class="hint">在已經設定好的裝置（例如電腦上原本的網頁）按「顯示手機設定 QR 碼」，掃描或複製那段文字貼在這裡。換網址、換瀏覽器或換手機都用這個，不必重建試算表。</p>
+        <textarea data-field="code" rows="3" placeholder="RD545SETUP1:…"></textarea><button data-act="import">套用設定碼</button></div>
+      <details class="create"><summary>還沒有試算表：建立新的（第一次使用，約 5 分鐘）</summary>
+      <p class="hint">量測紀錄會存在登入的 Google 帳號自己的試算表。每個人用自己的 Google 帳號建立，就各自存在自己的試算表。</p>
       <ol class="setup">
         <li>開一份新的 Google 試算表：<a href="https://sheets.new" target="_blank" rel="noopener">sheets.new</a></li>
         <li>點選單「擴充功能」→「Apps Script」，把原本的內容全部刪掉，貼上下面的程式碼，按儲存（磁碟圖示）。
@@ -51,7 +52,7 @@ export function mountPeoplePanel(root: HTMLElement, currentUuid: () => string): 
         <li>複製「網頁應用程式」網址（https://script.google.com/macros/s/…/exec），貼到這裡：
           <input data-field="url" placeholder="https://script.google.com/macros/s/…/exec"><button data-act="connect">連線測試</button></li>
       </ol>
-      <p class="hint">程式碼裡含有只屬於你的密鑰，請勿分享程式碼或網址。</p><p role="status">${esc(message)}</p>`;
+      <p class="hint">程式碼裡含有只屬於你的密鑰，請勿分享程式碼或網址。</p></details><p role="status">${esc(message)}</p>`;
     section.querySelector<HTMLButtonElement>('[data-act=copy]')!.onclick = async () => {
       try { await navigator.clipboard.writeText(buildAppsScript(token!)); message = '程式碼已複製。'; } catch { message = '無法自動複製，請手動全選文字框內容複製。'; }
       section.querySelector('[role=status]')!.textContent = message;
