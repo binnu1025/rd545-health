@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env*
+!.env.example
+ble-session-*
+.codex-remote-attachments/
+*.log
+*bugreport*.zip
+# Private identity file, captures and app analysis — never commit.
+RD545Private/
+# Internal handoff notes: contain personal paths and measurement details.
+CLAUDE_HANDOFF.md
