@@ -62,6 +62,8 @@ function toObjects(values: unknown[][] | undefined): Record<string, unknown>[] {
  */
 export function birthDate(v: unknown): string {
   if (typeof v === 'number' && isFinite(v)) return new Date(Math.round((v - 25569) * 86400000)).toISOString().slice(0, 10);
+  // The earlier Apps Script saved Taipei midnight as a UTC timestamp (1989-10-24T16:00:00.000Z = 1989-10-25 in Taipei).
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T.+Z$/.test(v.trim()) && !isNaN(Date.parse(v))) return new Date(Date.parse(v) + 8 * 3600000).toISOString().slice(0, 10);
   const m = String(v ?? '').trim().match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
   return m ? `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}` : String(v ?? '');
 }

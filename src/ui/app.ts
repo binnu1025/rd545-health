@@ -20,6 +20,8 @@ const scaleNamePrefix = 'TNT_BW', identityKey = '體脂計身分';
 const sheetIdKey = (email: string) => `rd545.sheetId.${email}`;
 const local = { get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* visit-only */ } } };
 const isOwner = (p: Person | null | undefined) => p?.體脂計本人 === 'true';
+const missing = (p: Partial<Person>) => [!p.姓名?.trim() && '姓名', p.性別 !== 'male' && p.性別 !== 'female' && '性別', !/^\d{4}-\d{2}-\d{2}$/.test(p.出生日期 ?? '') && '生日', !(Number(p.身高cm) > 0) && '身高'].filter((x): x is string => !!x);
+const complete = (p: Partial<Person>) => missing(p).length === 0;
 const taipeiTime = (d: Date) => {
   const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).formatToParts(d).map(x => [x.type, x.value]));
   return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}`;
@@ -154,19 +156,13 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
     const picker = people().length
       ? `<label>量測者<select data-field="person">${groups.map(g => `<optgroup label="${esc(g)}">${people().filter(x => x.群組 === g).map(x =>
           `<option value="${esc(x.id)}" ${x.id === person?.id ? 'selected' : ''}>${esc(x.姓名)}${isOwner(x) ? '（本人）' : ''}</option>`).join('')}</optgroup>`).join('')}</select></label>
-        <button type="button" class="link" data-act="add">＋ 新增家人</button>
-        <form class="add" data-form="member" hidden>
-          <label>名字<input name="姓名" required></label><label>群組<input name="群組" required list="rd545-groups" value="${esc(groups[0] ?? '家人')}"></label><datalist id="rd545-groups">${groups.map(g => `<option value="${esc(g)}">`).join('')}</datalist>
-          <label>性別<select name="性別"><option value="male">男</option><option value="female">女</option></select></label>
-          <label>出生日期<input name="出生日期" type="date" required></label><label>身高 (cm)<input name="身高cm" type="number" min="80" max="250" step="0.1" required></label>
-          <button type="submit">新增</button></form>`
+        <div class="person-actions">${person ? '<button type="button" class="link" data-act="edit">編輯資料</button>' : ''}<button type="button" class="link" data-act="add">＋ 新增家人</button></div>
+        ${person && !complete(person) ? `<p class="warn">${esc(person.姓名)} 的資料不完整（${missing(person).join('、')}），無法依性別年齡判定標準。請按「編輯資料」補上。</p>` : ''}
+        ${person ? `<form class="add" data-form="edit" hidden>${personFields(person, groups)}<button type="submit">儲存</button></form>` : ''}
+        <form class="add" data-form="member" hidden>${personFields({ 群組: groups[0] ?? '家人' }, groups)}<button type="submit">新增</button></form>`
       : `<div class="import"><h3>先新增你自己</h3><p class="hint">填好之後就能開始量測。${uuid ? '體脂計在旁邊的話，可以按「從體脂計讀取」自動帶入性別、生日與身高。' : ''}</p>
         ${uuid && !p ? `<button class="secondary" data-act="profile" ${busy ? 'disabled' : ''}>從體脂計讀取</button>` : ''}
-        <form class="add" data-form="owner">
-          <label>你的名字<input name="姓名" required></label><label>群組<input name="群組" required value="家人"></label>
-          <label>性別<select name="性別"><option value="male" ${p?.sex === 'male' ? 'selected' : ''}>男</option><option value="female" ${p?.sex === 'female' ? 'selected' : ''}>女</option></select></label>
-          <label>出生日期<input name="出生日期" type="date" required value="${p ? p.birthDate.toISOString().slice(0, 10) : ''}"></label>
-          <label>身高 (cm)<input name="身高cm" type="number" min="80" max="250" step="0.1" required value="${p?.heightCm ?? ''}"></label>
+        <form class="add" data-form="owner">${personFields({ 群組: '家人', 性別: p?.sex, 出生日期: p ? p.birthDate.toISOString().slice(0, 10) : '', 身高cm: p ? String(p.heightCm) : '' }, [])}
           <button type="submit" ${busy ? 'disabled' : ''}>完成</button></form></div>`;
     section.innerHTML = `<div class="heading"><h2>你的紀錄</h2><span class="badge">${esc(signedInEmail())}</span></div>
       ${picker}
@@ -181,9 +177,12 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
         <button class="secondary" data-act="refresh">重新整理</button>
         <button class="quiet" data-act="signout">登出</button></div></details>`;
     section.querySelector<HTMLSelectElement>('[data-field=person]')?.addEventListener('change', e => { selectedId = (e.target as HTMLSelectElement).value; saveSelectedPerson(selectedId); fresh = null; message = ''; render(); });
-    on('add', () => { const f = section.querySelector<HTMLFormElement>('[data-form=member]')!; f.hidden = !f.hidden; });
+    const toggle = (form: string) => () => { const f = section.querySelector<HTMLFormElement>(`[data-form=${form}]`)!; f.hidden = !f.hidden; };
+    on('add', toggle('member'));
+    on('edit', toggle('edit'));
     personForm('member', false);
     personForm('owner', true);
+    if (person) personForm('edit', isOwner(person), person);
     bindIdentityBox();
     // The scale is only needed when measuring; without an identity yet, ask for it right here.
     const needsScale = (go: () => void) => () => { if (!uuid) { needIdentity = true; message = ''; render(); return; } go(); };
@@ -214,15 +213,25 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
     if (person) report.append(renderTrend(store!.records, person));
   }
 
-  function personForm(name: 'owner' | 'member', asOwner: boolean) {
+  /** Name, birth date and sex are required for every person: the standards depend on sex and age. */
+  function personFields(v: Partial<Person>, groups: string[]) {
+    const sex = v.性別 === 'male' || v.性別 === 'female' ? v.性別 : '';
+    return `<label>姓名<input name="姓名" required value="${esc(v.姓名 ?? '')}"></label>
+      <label>群組<input name="群組" required list="rd545-groups" value="${esc(v.群組 ?? '')}"></label><datalist id="rd545-groups">${groups.map(g => `<option value="${esc(g)}">`).join('')}</datalist>
+      <label>性別<select name="性別" required><option value="" ${sex ? '' : 'selected'} disabled>請選擇</option><option value="male" ${sex === 'male' ? 'selected' : ''}>男</option><option value="female" ${sex === 'female' ? 'selected' : ''}>女</option></select></label>
+      <label>出生日期<input name="出生日期" type="date" required max="${new Date().toISOString().slice(0, 10)}" value="${esc(v.出生日期 ?? '')}"></label>
+      <label>身高 (cm)<input name="身高cm" type="number" min="80" max="250" step="0.1" required value="${esc(v.身高cm ?? '')}"></label>`;
+  }
+  function personForm(name: 'owner' | 'member' | 'edit', asOwner: boolean, existing?: Person) {
     const form = section.querySelector<HTMLFormElement>(`[data-form=${name}]`);
     if (!form) return;
     form.onsubmit = event => {
       event.preventDefault();
       const d = new FormData(form);
-      const person = { 群組: String(d.get('群組')).trim(), 姓名: String(d.get('姓名')).trim(), 性別: d.get('性別') as Person['性別'],
+      const person = { ...existing, 群組: String(d.get('群組')).trim(), 姓名: String(d.get('姓名')).trim(), 性別: d.get('性別') as Person['性別'],
         出生日期: String(d.get('出生日期')), 身高cm: String(d.get('身高cm')), 體脂計本人: asOwner ? 'true' : 'false' };
-      void act(async () => { const saved = await savePerson(store!, person); selectedId = saved.id; saveSelectedPerson(selectedId); return asOwner ? '' : `已新增 ${saved.姓名}。`; });
+      if (!complete(person)) { message = `請填完整：${missing(person).join('、')}`; render(); return; }
+      void act(async () => { const saved = await savePerson(store!, person); selectedId = saved.id; saveSelectedPerson(selectedId); return existing ? `已更新 ${saved.姓名} 的資料。` : asOwner ? '' : `已新增 ${saved.姓名}。`; });
     };
   }
 

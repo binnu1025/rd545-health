@@ -93,5 +93,6 @@ it('reads birth dates stored as text or as a Sheets date number', async () => {
   expect(birthDate(32878)).toBe('1990-01-05');       // date cell from the earlier Apps Script sheet
   expect(birthDate('1990/1/5')).toBe('1990-01-05');
   expect(birthDate('1990-01-05')).toBe('1990-01-05');
+  expect(birthDate('1989-10-24T16:00:00.000Z')).toBe('1989-10-25'); // Taipei midnight saved as UTC
   expect(birthDate('')).toBe('');
 });
