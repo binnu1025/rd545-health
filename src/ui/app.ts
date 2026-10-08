@@ -3,7 +3,7 @@ import { observedServiceUuid } from '../bluetooth/autoReceive';
 import { identifyScale, type ScaleStage } from '../bluetooth/identityProbe';
 import { ageAt, type ScaleProfile } from '../bluetooth/userProfile';
 import { isSignedIn, NeedsSignIn, pickSpreadsheet, prepareGoogle, rememberedEmail, signedInEmail, signIn, signOut } from '../google/googleAuth';
-import { adopt, findOrCreate, load, savePerson, saveRecords, saveSetting, spreadsheetUrl, untag, type Store } from '../google/sheetStore';
+import { adopt, deleteRecord, findOrCreate, load, moveRecord, savePerson, saveRecords, saveSetting, spreadsheetUrl, untag, type Store } from '../google/sheetStore';
 import { fromRecord, loadSelectedPerson, saveSelectedPerson, toRecord, type Person } from '../storage/sheetClient';
 import { renderBodyComposition, type ReportProfile } from './bodyFigure';
 import { renderTrend } from './trendChart';
@@ -16,6 +16,8 @@ import { exportReport } from '../report/report';
  */
 const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 const uuidPattern = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+const hasBluetooth = typeof navigator !== 'undefined' && !!navigator.bluetooth;
+const isIos = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const scaleNamePrefix = 'TNT_BW', identityKey = '體脂計身分', deviceIdentityKey = 'rd545.identity';
 const sheetIdKey = (email: string) => `rd545.sheetId.${email}`;
 const local = { get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* visit-only */ } } };
@@ -157,7 +159,8 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
           <button type="submit" ${busy ? 'disabled' : ''}>完成</button></form></div>`;
     section.innerHTML = `<div class="heading"><h2>你的紀錄</h2><span class="badge">${esc(signedInEmail())}</span></div>
       ${picker}
-      ${people().length ? `<button class="big measure" data-act="measure" ${busy || !canMeasure ? 'disabled' : ''}>開始量測</button>
+      ${people().length && !hasBluetooth ? noBluetoothBox() : ''}
+      ${people().length && hasBluetooth ? `<button class="big measure" data-act="measure" ${busy || !canMeasure ? 'disabled' : ''}>開始量測</button>
       ${!canMeasure && person ? `<p class="warn">${esc(person.姓名)} 的量測還不能用：體脂計目前只會用本人的身高、年齡、性別計算。替家人量測的功能開發中。</p>` : ''}
       ${canMeasure && !busy ? '<p class="hint">先輕踩一下體脂計，讓螢幕亮起來（體脂計休眠時藍牙找不到它），再按「開始量測」。</p>' : ''}
       ${needIdentity && !uuid ? identityBox() : ''}${progress()}<p role="status">${esc(message)}</p>
@@ -203,7 +206,45 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
         report.prepend(exportBtn);
       }
     }
-    if (person) report.append(renderTrend(store!.records, person));
+    if (person) report.append(renderTrend(store!.records, person), manageRecords(person));
+    on('copy-link', () => void navigator.clipboard.writeText(location.origin + location.pathname).then(() => { message = '網址已複製，請到 Bluefy 貼上開啟。'; render(); }, () => { message = `請手動複製網址：${location.origin + location.pathname}`; render(); }));
+  }
+
+  /** iPhone/iPad browsers (all WebKit) have no Web Bluetooth; viewing works, measuring needs a Bluetooth-capable browser. */
+  function noBluetoothBox() {
+    return isIos
+      ? `<div class="import no-bt"><h3>iPhone／iPad 無法直接量測</h3>
+        <p class="hint">蘋果不開放網頁使用藍牙，所以 Safari、Chrome 都連不上體脂計。看紀錄、趨勢和輸出報告不受影響。要在 iPhone 量測，請改用免費的 Bluefy 瀏覽器：</p>
+        <ol class="qr-steps"><li>下載 <a href="https://apps.apple.com/app/id1492822055" target="_blank" rel="noopener">Bluefy – Web BLE Browser</a></li><li><button type="button" class="link" data-act="copy-link">複製這個網址</button>，在 Bluefy 貼上開啟</li><li>用 Google 登入後就能按「開始量測」</li></ol></div>`
+      : '<div class="import no-bt"><h3>這個瀏覽器不支援藍牙</h3><p class="hint">請改用 Chrome 或 Edge（Android 手機或電腦）開啟這個網頁才能量測。看紀錄、趨勢和輸出報告不受影響。</p></div>';
+  }
+
+  /** Delete a wrong measurement, or move it to the person who actually stood on the scale. Values are never edited. */
+  function manageRecords(person: Person): HTMLElement {
+    const rows = store!.records.filter(r => r['人員id'] === person.id).map(r => ({ r, at: new Date(String(r['量測時間'])) })).filter(x => !isNaN(+x.at)).sort((a, b) => +b.at - +a.at);
+    const box = document.createElement('details'); box.className = 'manage';
+    const summary = document.createElement('summary'); summary.textContent = `管理紀錄（${rows.length} 筆）`; box.append(summary);
+    const others = people().filter(x => x.id !== person.id);
+    for (const { r, at } of rows) {
+      const key = String(r['紀錄鍵']), item = document.createElement('div'); item.className = 'record-row';
+      const text = document.createElement('span');
+      const num = (k: string, d: number, u: string) => typeof r[k] === 'number' ? `${(r[k] as number).toFixed(d)}${u}` : '—';
+      text.textContent = `${taipeiTime(at).slice(0, 16)}　${num('體重kg', 1, ' kg')}　體脂 ${num('體脂率%', 1, '%')}`;
+      const del = document.createElement('button'); del.className = 'quiet'; del.textContent = '刪除';
+      del.onclick = () => { if (confirm(`刪除 ${taipeiTime(at).slice(0, 16)} 這筆紀錄？刪除後無法復原。`)) void act(async () => { await deleteRecord(store!, key); fresh = null; return '已刪除這筆紀錄。'; }); };
+      item.append(text, del);
+      if (others.length) {
+        const pick = document.createElement('select'); pick.className = 'move-to';
+        pick.append(new Option('移給…', ''), ...others.map(o => new Option(o.姓名, o.id)));
+        pick.onchange = () => { const to = others.find(o => o.id === pick.value); if (!to) return;
+          if (!confirm(`把這筆紀錄改成 ${to.姓名} 的？`)) { pick.value = ''; return; }
+          void act(async () => { await moveRecord(store!, key, to); fresh = null; return `已移給 ${to.姓名}。`; }); };
+        item.append(pick);
+      }
+      box.append(item);
+    }
+    if (!rows.length) { const p = document.createElement('p'); p.className = 'hint'; p.textContent = '還沒有紀錄。'; box.append(p); }
+    return box;
   }
 
   /** Name, birth date and sex are required for every person: the standards depend on sex and age. */

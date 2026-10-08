@@ -147,3 +147,34 @@ export async function adopt(id: string, api: Fetch = googleFetch): Promise<strin
 export async function untag(id: string, api: Fetch = googleFetch) {
   await api(`${driveApi}/${id}`, { method: 'PATCH', body: JSON.stringify({ appProperties: { [tag.key]: null } }) });
 }
+
+/** Row number (1-based, header = 1) of a measurement, read fresh so a concurrent edit cannot make us touch the wrong row. */
+async function recordRow(store: Store, key: string, api: Fetch): Promise<number> {
+  const data = await api<{ values?: string[][] }>(`${sheetsApi}/${store.spreadsheetId}/values/${q(`'${RECORDS}'!A:A`)}`);
+  const index = (data.values ?? []).findIndex(row => row[0] === key);
+  if (index < 1) throw Error('在試算表裡找不到這筆紀錄，可能已被刪除，請按「重新整理」');
+  return index + 1;
+}
+
+/** Deletes one measurement row from the 量測紀錄 tab. */
+export async function deleteRecord(store: Store, key: string, api: Fetch = googleFetch) {
+  const row = await recordRow(store, key, api);
+  const meta = await api<{ sheets: { properties: { sheetId: number; title: string } }[] }>(`${sheetsApi}/${store.spreadsheetId}?fields=sheets.properties(sheetId,title)`);
+  const sheetId = meta.sheets.find(s => s.properties.title === RECORDS)!.properties.sheetId;
+  await api(`${sheetsApi}/${store.spreadsheetId}:batchUpdate`, { method: 'POST', body: JSON.stringify({ requests: [{ deleteDimension: { range: { sheetId, dimension: 'ROWS', startIndex: row - 1, endIndex: row } } }] }) });
+  store.records = store.records.filter(r => String(r['紀錄鍵']) !== key);
+}
+
+/** Moves a measurement to another person (when the wrong person was selected while measuring). */
+export async function moveRecord(store: Store, key: string, person: Person, api: Fetch = googleFetch) {
+  const record = store.records.find(r => String(r['紀錄鍵']) === key);
+  if (!record) throw Error('找不到這筆紀錄，請按「重新整理」');
+  const newKey = `${new Date(String(record['量測時間'])).toISOString()}|${person.id}`;
+  if (store.records.some(r => String(r['紀錄鍵']) === newKey)) throw Error(`${person.姓名} 已經有同一時間的紀錄`);
+  const row = await recordRow(store, key, api);
+  const column = (header: string) => { const i = recordHeaders.indexOf(header as never); return String.fromCharCode(65 + i); };
+  const changes: [string, string][] = [['紀錄鍵', newKey], ['人員id', person.id], ['群組', person.群組], ['姓名', person.姓名]];
+  await api(`${sheetsApi}/${store.spreadsheetId}/values:batchUpdate`, { method: 'POST', body: JSON.stringify({ valueInputOption: 'RAW',
+    data: changes.map(([h, v]) => ({ range: `'${RECORDS}'!${column(h)}${row}`, values: [[v]] })) }) });
+  Object.assign(record, Object.fromEntries(changes));
+}

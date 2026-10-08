@@ -20,8 +20,23 @@ function fakeGoogle(existing = false) {
       body.sheets.forEach((s: { properties: { title: string } }) => tabs.set(s.properties.title, []));
       return { spreadsheetId: 's1', sheets: body.sheets.map((s: { properties: { title: string } }, i: number) => ({ properties: { sheetId: i, title: s.properties.title } })) };
     }
-    if (url.includes('values:batchUpdate')) { for (const d of body.data) tabs.get(tabOf(d.range))!.splice(0, 1, d.values[0]); return {}; }
-    if (url.endsWith(':batchUpdate')) { for (const r of body.requests) if (r.addSheet) tabs.set(r.addSheet.properties.title, []); return {}; }
+    if (url.includes('values:batchUpdate')) {
+      for (const d of body.data) {
+        const [, col, row] = decodeURIComponent(d.range).match(/!([A-Z])(\d+)/)!, rows = tabs.get(tabOf(d.range))!;
+        if (col === 'A' && row === '1') rows.splice(0, 1, d.values[0]); // header row
+        else { const r = rows[Number(row) - 1]; r[col.charCodeAt(0) - 65] = d.values[0][0]; }
+      }
+      return {};
+    }
+    if (method === 'GET' && decodeURIComponent(url).includes("!A:A")) return { values: tabs.get(tabOf(url))!.map(r => [r[0]]) };
+    if (method === 'GET' && url.includes('fields=sheets.properties(sheetId,title)')) return { sheets: [...tabs.keys()].map((title, sheetId) => ({ properties: { sheetId, title } })) };
+    if (url.endsWith(':batchUpdate')) {
+      for (const r of body.requests) {
+        if (r.addSheet) tabs.set(r.addSheet.properties.title, []);
+        if (r.deleteDimension) { const { sheetId, startIndex, endIndex } = r.deleteDimension.range; [...tabs.values()][sheetId].splice(startIndex, endIndex - startIndex); }
+      }
+      return {};
+    }
     if (url.includes('values:batchGet')) return { valueRanges: [...url.matchAll(/ranges=([^&]+)/g)].map(m => ({ values: tabs.get(tabOf(m[1])) })) };
     if (url.includes(':append')) { tabs.get(tabOf(url))!.push(...body.values); return {}; }
     if (method === 'PUT') { const row = Number(decodeURIComponent(url).match(/!A(\d+)/)![1]); tabs.get(tabOf(url))![row - 1] = body.values[0]; return {}; }
@@ -95,4 +110,21 @@ it('reads birth dates stored as text or as a Sheets date number', async () => {
   expect(birthDate('1990-01-05')).toBe('1990-01-05');
   expect(birthDate('1989-10-24T16:00:00.000Z')).toBe('1989-10-25'); // Taipei midnight saved as UTC
   expect(birthDate('')).toBe('');
+});
+it('deletes one measurement row and moves another to a different person', async () => {
+  const { deleteRecord, moveRecord } = await import('../src/google/sheetStore');
+  const g = fakeGoogle();
+  const store = await load(await findOrCreate(g.api), g.api);
+  const me = await savePerson(store, owner, g.api), mom = await savePerson(store, { ...owner, 姓名: '媽媽', 體脂計本人: 'false' }, g.api);
+  const a = toRecord(me, new Date('2026-03-01T00:00:00Z'), detail), b = toRecord(me, new Date('2026-03-02T00:00:00Z'), detail);
+  await saveRecords(store, [a, b], g.api);
+  await deleteRecord(store, String(a['紀錄鍵']), g.api);
+  expect(g.tabs.get('量測紀錄')!.map(r => r[0])).toEqual(['紀錄鍵', b['紀錄鍵']]);           // only that row removed
+  await moveRecord(store, String(b['紀錄鍵']), mom, g.api);
+  const row = g.tabs.get('量測紀錄')![1];
+  expect(row[recordHeaders.indexOf('人員id')]).toBe(mom.id);
+  expect(row[recordHeaders.indexOf('姓名')]).toBe('媽媽');
+  expect(row[0]).toBe(`2026-03-02T00:00:00.000Z|${mom.id}`);
+  expect(row[recordHeaders.indexOf('體重kg')]).toBe(70);                                // measured values untouched
+  await expect(deleteRecord(store, 'missing', g.api)).rejects.toThrow('找不到');
 });
