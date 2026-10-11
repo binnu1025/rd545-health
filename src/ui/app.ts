@@ -285,7 +285,7 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
   function personFields(v: Partial<Person>, groups: string[]) {
     const sex = v.性別 === 'male' || v.性別 === 'female' ? v.性別 : '';
     return `<label>姓名<input name="姓名" required value="${esc(v.姓名 ?? '')}"></label>
-      <label>群組<input name="群組" required list="rd545-groups" value="${esc(v.群組 ?? '')}"></label><datalist id="rd545-groups">${groups.map(g => `<option value="${esc(g)}">`).join('')}</datalist>
+      <label>群組<input name="群組" required list="rd545-groups" placeholder="例如：家人、爸媽家" value="${esc(v.群組 ?? '')}"><small class="hint">可從清單選，或直接輸入新名稱建立新群組</small></label><datalist id="rd545-groups">${groups.map(g => `<option value="${esc(g)}">`).join('')}</datalist>
       <label>性別<select name="性別" required><option value="" ${sex ? '' : 'selected'} disabled>請選擇</option><option value="male" ${sex === 'male' ? 'selected' : ''}>男</option><option value="female" ${sex === 'female' ? 'selected' : ''}>女</option></select></label>
       <label>出生日期<input name="出生日期" type="date" required max="${new Date().toISOString().slice(0, 10)}" value="${esc(v.出生日期 ?? '')}"></label>
       <label>身高 (cm)<input name="身高cm" type="number" min="80" max="250" step="0.1" required value="${esc(v.身高cm ?? '')}"></label>
