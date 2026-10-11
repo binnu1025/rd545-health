@@ -170,6 +170,29 @@ export async function deleteRecord(store: Store, key: string, api: Fetch = googl
   store.records = store.records.filter(r => String(r['紀錄鍵']) !== key);
 }
 
+/**
+ * Removes a person and all of their measurements. Rows are found by re-reading column A (person id / record key ending in
+ * "|id"), and deleted bottom-up in one request so earlier deletions cannot shift later ones.
+ */
+export async function deletePerson(store: Store, person: Person, api: Fetch = googleFetch) {
+  const meta = await api<{ sheets: { properties: { sheetId: number; title: string } }[] }>(`${sheetsApi}/${store.spreadsheetId}?fields=sheets.properties(sheetId,title)`);
+  const sheetOf = (title: string) => meta.sheets.find(s => s.properties.title === title)!.properties.sheetId;
+  const rowsWhere = async (title: string, match: (a: string) => boolean) => {
+    const data = await api<{ values?: string[][] }>(`${sheetsApi}/${store.spreadsheetId}/values/${q(`'${title}'!A:A`)}`);
+    return (data.values ?? []).map((r, i) => ({ i, a: r[0] ?? '' })).filter(x => x.i > 0 && match(x.a)).map(x => x.i);
+  };
+  const peopleRows = await rowsWhere(PEOPLE, a => a === person.id);
+  if (!peopleRows.length) throw Error('在試算表裡找不到這個人，請按「重新整理」');
+  const recordRows = await rowsWhere(RECORDS, a => a.endsWith(`|${person.id}`));
+  const requests = [...recordRows.map(i => [sheetOf(RECORDS), i] as const), ...peopleRows.map(i => [sheetOf(PEOPLE), i] as const)]
+    .sort((x, y) => y[1] - x[1])
+    .map(([sheetId, i]) => ({ deleteDimension: { range: { sheetId, dimension: 'ROWS', startIndex: i, endIndex: i + 1 } } }));
+  await api(`${sheetsApi}/${store.spreadsheetId}:batchUpdate`, { method: 'POST', body: JSON.stringify({ requests }) });
+  store.people = store.people.filter(p => p.id !== person.id);
+  store.records = store.records.filter(r => r['人員id'] !== person.id);
+  return recordRows.length;
+}
+
 /** Moves a measurement to another person (when the wrong person was selected while measuring). */
 export async function moveRecord(store: Store, key: string, person: Person, api: Fetch = googleFetch) {
   const record = store.records.find(r => String(r['紀錄鍵']) === key);

@@ -19,3 +19,4 @@ a.button{display:inline-flex;align-items:center;justify-content:center;min-heigh
 .tick.goal{top:-17px;color:#0b5b4b;font-weight:700}
 .bar-row:has(.tick.goal){padding-top:24px}
 .bar-formula{grid-column:1/-1;margin:-6px 0 0;padding:6px 10px;background:#f4f8f6;border-radius:6px;font-size:12px;color:#183d38;line-height:1.5}
+.quiet.danger{color:#a3392b;border-color:#e8c4bd;margin-left:8px}

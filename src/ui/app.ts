@@ -3,7 +3,7 @@ import { observedServiceUuid } from '../bluetooth/autoReceive';
 import { identifyScale, type ScaleStage } from '../bluetooth/identityProbe';
 import { ageAt, type ScaleProfile } from '../bluetooth/userProfile';
 import { isSignedIn, NeedsSignIn, pickSpreadsheet, prepareGoogle, rememberedEmail, signedInEmail, signIn, signOut } from '../google/googleAuth';
-import { adopt, deleteRecord, findOrCreate, load, moveRecord, savePerson, saveRecords, saveSetting, spreadsheetUrl, untag, type Store } from '../google/sheetStore';
+import { adopt, deletePerson, deleteRecord, findOrCreate, load, moveRecord, savePerson, saveRecords, saveSetting, spreadsheetUrl, untag, type Store } from '../google/sheetStore';
 import { fromRecord, loadSelectedPerson, saveSelectedPerson, toRecord, type Person } from '../storage/sheetClient';
 import { renderBodyComposition, type ReportProfile } from './bodyFigure';
 import { renderTrend } from './trendChart';
@@ -164,7 +164,7 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
           `<option value="${esc(x.id)}" ${x.id === person?.id ? 'selected' : ''}>${esc(x.姓名)}${isOwner(x) ? '（本人）' : ''}</option>`).join('')}</optgroup>`).join('')}</select></label>
         ${offline ? '' : `<div class="person-actions">${person ? '<button type="button" class="link" data-act="edit">編輯資料</button>' : ''}<button type="button" class="link" data-act="add">＋ 新增家人</button></div>`}
         ${person && !complete(person) ? `<p class="warn">${esc(person.姓名)} 的資料不完整（${missing(person).join('、')}），無法依性別年齡判定標準。請按「編輯資料」補上。</p>` : ''}
-        ${person ? `<form class="add" data-form="edit" hidden>${personFields(person, groups)}<button type="submit">儲存</button></form>` : ''}
+        ${person ? `<form class="add" data-form="edit" hidden>${personFields(person, groups)}<button type="submit">儲存</button>${person.體脂計本人 === 'true' ? '' : `<button type="button" class="quiet danger" data-act="delete-person">刪除 ${esc(person.姓名)}</button>`}</form>` : ''}
         <form class="add" data-form="member" hidden>${personFields({ 群組: groups[0] ?? '家人' }, groups)}<button type="submit">新增</button></form>`
       : `<div class="import"><h3>先新增你自己</h3><p class="hint">填好之後就能開始量測。${uuid ? '體脂計在旁邊的話，可以按「從體脂計讀取」自動帶入性別、生日與身高。' : ''}</p>
         ${uuid && !p ? `<button class="secondary" data-act="profile" ${busy ? 'disabled' : ''}>從體脂計讀取</button>` : ''}
@@ -193,6 +193,13 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
     personForm('member', false);
     personForm('owner', true);
     if (person) personForm('edit', isOwner(person), person);
+    on('delete-person', () => {
+      if (!person || isOwner(person)) return;
+      const count = store!.records.filter(r => r['人員id'] === person.id).length;
+      if (!confirm(`確定刪除「${person.姓名}」？${count ? `他的 ${count} 筆量測紀錄也會一起刪除，` : ''}刪除後無法復原。`)) return;
+      void act(async () => { const n = await deletePerson(store!, person); selectedId = owner()?.id ?? people()[0]?.id ?? null; saveSelectedPerson(selectedId); fresh = null;
+        return `已刪除 ${person.姓名}${n ? `和 ${n} 筆紀錄` : ''}。`; });
+    });
     bindIdentityBox();
     // The scale is only needed when measuring; without an identity yet, ask for it right here.
     const needsScale = (go: () => void) => () => { if (!uuid) { needIdentity = true; message = ''; render(); return; } go(); };

@@ -139,3 +139,16 @@ it('appends new 人員 columns to an older sheet without touching its rows', asy
   expect(g.tabs.get('人員')![1]).toEqual(person);
   expect(store.people[0].姓名).toBe('我');
 });
+it('deletes a person together with only their own measurements', async () => {
+  const { deletePerson } = await import('../src/google/sheetStore');
+  const g = fakeGoogle();
+  const store = await load(await findOrCreate(g.api), g.api);
+  const me = await savePerson(store, owner, g.api), kid = await savePerson(store, { ...owner, 姓名: '小孩', 體脂計本人: 'false' }, g.api);
+  const mine = toRecord(me, new Date('2026-03-01T00:00:00Z'), detail);
+  await saveRecords(store, [toRecord(kid, new Date('2026-03-02T00:00:00Z'), detail), mine, toRecord(kid, new Date('2026-03-03T00:00:00Z'), detail)], g.api);
+  expect(await deletePerson(store, kid, g.api)).toBe(2);
+  expect(g.tabs.get('人員')!.map(r => r[0])).toEqual(['id', me.id]);
+  expect(g.tabs.get('量測紀錄')!.map(r => r[0])).toEqual(['紀錄鍵', mine['紀錄鍵']]);
+  expect(store.people.map(p => p.id)).toEqual([me.id]);
+  expect(store.records).toHaveLength(1);
+});
