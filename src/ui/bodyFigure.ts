@@ -58,7 +58,7 @@ export function renderBodyComposition(detail: BodyComposition, measuredAtText: s
     <h4>肌肉脂肪分析</h4><div class="bars-host"></div>
     <h4>部位分析</h4>
     <div class="figures"><figure><figcaption>部位肌肉量</figcaption>${figureSvg(detail.segments, { mode: 'muscle' })}<p class="legend">${figureLegend('muscle')}</p></figure>
-      <figure><figcaption>部位體脂率</figcaption>${figureSvg(detail.segments, { mode: 'fat' })}<p class="legend">${figureLegend('fat')}</p></figure></div>
+      <figure><figcaption>部位體脂率・脂肪重</figcaption>${figureSvg(detail.segments, { mode: 'fat', whole: { fatPct: detail.bodyFatPct, fatKg: detail.weightKg !== null && detail.bodyFatPct !== null ? detail.weightKg * detail.bodyFatPct / 100 : null } })}<p class="legend">${figureLegend('fat')}</p></figure></div>
     <table class="segments"><thead><tr><th>部位</th><th>肌肉量</th><th>體脂率</th><th>肌肉評分</th><th>肌肉品質</th></tr></thead><tbody>${segmentRows}</tbody></table>`;
   root.querySelector('.bars-host')!.replaceWith(renderBars(wholeBodyBars(detail, profile, extra.previous ?? null, extra.goals)));
   return root;

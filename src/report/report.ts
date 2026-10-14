@@ -104,9 +104,9 @@ export function buildReportSvg(input: ReportInput, scale = 1): string {
   }
   out += section(y, '部位分析'); y += 50;
   const figW = 300, figH = 440, figs = `<svg x="40" y="${y}" width="${figW}" height="${figH}">${figureSvg(d.segments, { mode: 'muscle' })}</svg>`
-    + `<svg x="${40 + figW + 10}" y="${y}" width="${figW}" height="${figH}">${figureSvg(d.segments, { mode: 'fat' })}</svg>`
+    + `<svg x="${40 + figW + 10}" y="${y}" width="${figW}" height="${figH}">${figureSvg(d.segments, { mode: 'fat', whole: { fatPct: d.bodyFatPct, fatKg: d.weightKg !== null && d.bodyFatPct !== null ? d.weightKg * d.bodyFatPct / 100 : null } })}</svg>`
     + `<text x="${40 + figW / 2}" y="${y + figH + 4}" text-anchor="middle" font-size="16" font-weight="700" fill="${brand}">部位肌肉量</text>`
-    + `<text x="${50 + figW * 1.5}" y="${y + figH + 4}" text-anchor="middle" font-size="16" font-weight="700" fill="${brand}">部位體脂率</text>`;
+    + `<text x="${50 + figW * 1.5}" y="${y + figH + 4}" text-anchor="middle" font-size="16" font-weight="700" fill="${brand}">部位體脂率・脂肪重</text>`;
   // Trend of weight, body fat and muscle beside the figures.
   const history = trends(input, 700, y, W - 50 - 700, figH);
   out += figs + history;
@@ -115,7 +115,7 @@ export function buildReportSvg(input: ReportInput, scale = 1): string {
   const footer = `<line x1="50" x2="${W - 50}" y1="${H - 96}" y2="${H - 96}" stroke="${line}"/>`
     + `<text x="50" y="${H - 68}" font-size="13" fill="${muted}">標準出處：${xml(src1)}</text>`
     + (src2 ? `<text x="50" y="${H - 48}" font-size="13" fill="${muted}">　　　　　${xml(src2)}</text>` : '')
-    + `<text x="50" y="${H - 24}" font-size="13" fill="${muted}">本報告依 TANITA RD-545 量測結果產生，僅供健康管理參考，不能取代醫療診斷；四肢肌肉指數由部位肌肉量估算，通常比醫院檢測偏高。</text>`;
+    + `<text x="50" y="${H - 24}" font-size="13" fill="${muted}">本報告依 TANITA RD-545 量測結果產生，僅供健康管理參考，不能取代醫療診斷；四肢肌肉指數與部位脂肪重（約）為推算值，僅供參考。</text>`;
   const header = `<rect width="${W}" height="140" fill="${brand}"/><text x="50" y="74" font-size="40" font-weight="700" fill="#ffffff">身體組成分析報告</text>`
     + `<text x="52" y="110" font-size="17" fill="#cfe6da">Body Composition Report・RD-545</text>`
     + `<text x="${W - 50}" y="74" text-anchor="end" font-size="22" fill="#ffffff">${xml(taipei(input.measuredAt))}</text>`;

@@ -27,11 +27,19 @@ const callouts: Record<SegmentKey, { box: [number, number]; to: [number, number]
 export interface FigureOptions {
   mode: 'muscle' | 'fat';
   /** Inline style values so the markup also renders standalone (in the JPG report) without page CSS. */
+  /** Whole-body body fat shown in the corner of the fat figure. */
+  whole?: { fatPct: number | null; fatKg: number | null };
   colors?: Partial<Record<'above' | 'standard' | 'below' | 'unknown' | 'fat' | 'skin', string>>;
 }
 const palette = { above: '#2f8f6f', standard: '#8fbfaa', below: '#e0a35a', unknown: '#d5ddd9', fat: '#d9a77c', skin: '#e7eeea' };
 // TANITA publishes no range for its muscle score, so colour only follows its sign.
 const scoreTone = (s: number | null) => s === null ? 'unknown' : s > 0 ? 'above' : s < 0 ? 'below' : 'standard';
+
+/**
+ * TANITA reports a segment's muscle and fat percentage but not its fat weight. Treating the segment as fat + muscle,
+ * fat = muscle × pct ÷ (100 − pct). An estimate: the segments add up to slightly less than the whole-body fat mass.
+ */
+export const segmentFatKg = (s: Segment) => s.muscleKg === null || s.fatPct === null || s.fatPct >= 100 ? null : s.muscleKg * s.fatPct / (100 - s.fatPct);
 
 export function figureSvg(segments: Record<SegmentKey, Segment>, options: FigureOptions): string {
   const c = { ...palette, ...options.colors };
@@ -41,13 +49,18 @@ export function figureSvg(segments: Record<SegmentKey, Segment>, options: Figure
   const order: SegmentKey[] = ['rightArm', 'leftArm', 'rightLeg', 'leftLeg', 'trunk'];
   const body = order.map(k => `<path d="${paths[k]}" fill="${fill(k)}" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"><title>${segmentNames[k]}：${value(segments[k])}</title></path>`).join('');
   const labels = keys.map(k => {
-    const { box: [x, y], to: [tx, ty] } = callouts[k], w = 60, h = 38, trunk = k === 'trunk';
-    const bx = trunk ? x - w / 2 + 30 : x;
+    const fat = options.mode === 'fat', kg = fat ? segmentFatKg(segments[k]) : null;
+    const { box: [x, y], to: [tx, ty] } = callouts[k], w = fat ? 66 : 60, h = fat ? 52 : 38, trunk = k === 'trunk';
+    const bx = trunk ? x - w / 2 + 30 : k.startsWith('left') ? x + 60 - w : x;
     const leader = trunk ? '' : `<line x1="${k.startsWith('right') ? bx + w : bx}" y1="${y + h / 2}" x2="${tx}" y2="${ty}" stroke="#9fb5ab" stroke-width="1"/>`;
     return `${leader}<rect x="${bx}" y="${y}" width="${w}" height="${h}" rx="8" fill="#ffffff" fill-opacity="${trunk ? 0.9 : 1}" stroke="#d4e2da"/>`
       + `<text x="${bx + w / 2}" y="${y + 15}" text-anchor="middle" font-size="11" fill="#5d7a70">${segmentNames[k]}</text>`
-      + `<text x="${bx + w / 2}" y="${y + 31}" text-anchor="middle" font-size="12.5" font-weight="700" fill="#183d38">${value(segments[k])}</text>`;
-  }).join('');
+      + `<text x="${bx + w / 2}" y="${y + 31}" text-anchor="middle" font-size="12.5" font-weight="700" fill="#183d38">${value(segments[k])}</text>`
+      + (fat ? `<text x="${bx + w / 2}" y="${y + 46}" text-anchor="middle" font-size="11" fill="#9a5418">約 ${kg === null ? '—' : kg.toFixed(2)} kg</text>` : '');
+  }).join('')
+    + (options.mode === 'fat' && options.whole ? `<rect x="4" y="6" width="96" height="46" rx="8" fill="#fbf1e6" stroke="#ecd3b8"/>`
+      + `<text x="52" y="22" text-anchor="middle" font-size="11" fill="#9a5418">全身體脂</text>`
+      + `<text x="52" y="42" text-anchor="middle" font-size="13" font-weight="700" fill="#183d38">${options.whole.fatPct === null ? '—' : options.whole.fatPct.toFixed(1) + '%'}・${options.whole.fatKg === null ? '—' : options.whole.fatKg.toFixed(1) + 'kg'}</text>` : '');
   return `<svg viewBox="0 0 300 440" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${options.mode === 'muscle' ? '部位肌肉量' : '部位體脂率'}人形圖" font-family="'Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif">
     <g transform="translate(50 0)"><g fill="${c.skin}" stroke="#c9d8d0" stroke-width="1.5">${head}</g>${body}</g>${labels}</svg>`;
 }
@@ -55,5 +68,5 @@ export function figureSvg(segments: Record<SegmentKey, Segment>, options: Figure
 export function figureLegend(mode: 'muscle' | 'fat'): string {
   return mode === 'muscle'
     ? `<span><i style="background:${palette.above}"></i>肌肉評分 +</span><span><i style="background:${palette.standard}"></i>0</span><span><i style="background:${palette.below}"></i>−</span>`
-    : '<span>部位體脂率沒有公開的標準範圍，只標示數值</span>';
+    : '<span>部位體脂率沒有公開的標準範圍，只標示數值；部位脂肪重（約 kg）由部位肌肉量與體脂率推算，為估計值</span>';
 }
