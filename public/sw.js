@@ -10,7 +10,8 @@ self.addEventListener('fetch', event => {
   if (request.method !== 'GET' || url.origin !== self.location.origin) return;
   const keep = response => { if (response.ok) { const copy = response.clone(); caches.open(CACHE).then(cache => cache.put(request, copy)); } return response; };
   if (request.mode === 'navigate') {
-    event.respondWith(fetch(request).then(keep).catch(() => caches.match(request, { ignoreSearch: true }).then(hit => hit || caches.match('./'))));
+    // no-cache: GitHub Pages sends max-age=600, so a plain fetch could return a page up to 10 minutes old after a deploy.
+    event.respondWith(fetch(request, { cache: 'no-cache' }).then(keep).catch(() => caches.match(request, { ignoreSearch: true }).then(hit => hit || caches.match('./'))));
     return;
   }
   event.respondWith(caches.match(request).then(hit => hit || fetch(request).then(keep)));
