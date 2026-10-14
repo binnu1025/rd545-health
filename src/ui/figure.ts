@@ -37,9 +37,18 @@ const scoreTone = (s: number | null) => s === null ? 'unknown' : s > 0 ? 'above'
 
 /**
  * TANITA reports a segment's muscle and fat percentage but not its fat weight. Treating the segment as fat + muscle,
- * fat = muscle × pct ÷ (100 − pct). An estimate: the segments add up to slightly less than the whole-body fat mass.
+ * fat = muscle × pct ÷ (100 − pct).
  */
-export const segmentFatKg = (s: Segment) => s.muscleKg === null || s.fatPct === null || s.fatPct >= 100 ? null : s.muscleKg * s.fatPct / (100 - s.fatPct);
+const rawFatKg = (s: Segment) => s.muscleKg === null || s.fatPct === null || s.fatPct >= 100 ? null : s.muscleKg * s.fatPct / (100 - s.fatPct);
+/**
+ * Segment fat weights, scaled so they add up to the whole-body fat mass. The raw estimate counts only muscle as the
+ * non-fat part and leaves out bone, so on its own it falls short of the whole-body figure by roughly bone × fat ratio.
+ */
+export function segmentFatKgs(segments: Record<SegmentKey, Segment>, wholeFatKg: number | null): Record<SegmentKey, number | null> {
+  const keys = Object.keys(segments) as SegmentKey[], raw = keys.map(k => rawFatKg(segments[k]));
+  const sum = raw.reduce<number>((a, v) => a + (v ?? 0), 0), scale = wholeFatKg !== null && sum > 0 && raw.every(v => v !== null) ? wholeFatKg / sum : 1;
+  return Object.fromEntries(keys.map((k, i) => [k, raw[i] === null ? null : raw[i]! * scale])) as Record<SegmentKey, number | null>;
+}
 
 export function figureSvg(segments: Record<SegmentKey, Segment>, options: FigureOptions): string {
   const c = { ...palette, ...options.colors };
@@ -48,8 +57,9 @@ export function figureSvg(segments: Record<SegmentKey, Segment>, options: Figure
   const fill = (k: SegmentKey) => options.mode === 'fat' ? c.fat : c[scoreTone(segments[k].muscleScore)];
   const order: SegmentKey[] = ['rightArm', 'leftArm', 'rightLeg', 'leftLeg', 'trunk'];
   const body = order.map(k => `<path d="${paths[k]}" fill="${fill(k)}" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"><title>${segmentNames[k]}：${value(segments[k])}</title></path>`).join('');
+  const fatKgs = segmentFatKgs(segments, options.whole?.fatKg ?? null);
   const labels = keys.map(k => {
-    const fat = options.mode === 'fat', kg = fat ? segmentFatKg(segments[k]) : null, trunk = k === 'trunk';
+    const fat = options.mode === 'fat', kg = fat ? fatKgs[k] : null, trunk = k === 'trunk';
     const { box: [x, y], to: [tx, ty] } = callouts[k], w = 76, h = fat ? 68 : 52;
     const bx = trunk ? x - w / 2 : x;
     const leader = trunk ? '' : `<line x1="${k.startsWith('right') ? bx + w : bx}" y1="${y + h / 2}" x2="${tx}" y2="${ty}" stroke="#a9bdb4" stroke-width="1"/><circle cx="${tx}" cy="${ty}" r="2.5" fill="#ffffff" stroke="#7f9a8f" stroke-width="1"/>`;
@@ -69,5 +79,5 @@ export function figureSvg(segments: Record<SegmentKey, Segment>, options: Figure
 export function figureLegend(mode: 'muscle' | 'fat'): string {
   return mode === 'muscle'
     ? `<span><i style="background:${palette.above}"></i>肌肉評分 +</span><span><i style="background:${palette.standard}"></i>0</span><span><i style="background:${palette.below}"></i>−</span>`
-    : '<span>部位體脂率沒有公開的標準範圍，只標示數值；部位脂肪重（約 kg）由部位肌肉量與體脂率推算，為估計值</span>';
+    : '<span>部位體脂率沒有公開的標準範圍，只標示數值；部位脂肪重（約 kg）由部位肌肉量與體脂率推算，並調整為加總等於全身體脂肪重，為估計值</span>';
 }

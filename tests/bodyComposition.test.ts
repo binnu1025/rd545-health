@@ -29,3 +29,11 @@ it('rejects unknown tags or a misaligned layout instead of guessing', () => {
   const unknown = frame(); unknown[15] = 0x12; expect(decodeBodyComposition(unknown)).toBeNull();
   const shifted = frame(); shifted.copyWithin(7, 6, 344); expect(decodeBodyComposition(shifted)).toBeNull();
 });
+it('splits whole-body fat mass across segments so the parts add up to the whole', async () => {
+  const { segmentFatKgs } = await import('../src/ui/figure');
+  const seg = (m: number, f: number) => ({ muscleKg: m, fatPct: f, muscleScore: 0, muscleQuality: 70 });
+  const kg = segmentFatKgs({ rightArm: seg(3, 21.6), leftArm: seg(2.9, 22.7), trunk: seg(31.9, 30.8), rightLeg: seg(11, 26.6), leftLeg: seg(10.8, 26.5) }, 25.04);
+  expect(Object.values(kg).reduce((a, v) => a! + v!, 0)).toBeCloseTo(25.04, 6);
+  expect(kg.trunk).toBeCloseTo(14.96, 1);
+  expect(kg.rightArm! / kg.leftArm!).toBeCloseTo((3 * 21.6 / 78.4) / (2.9 * 22.7 / 77.3), 6); // proportions kept
+});
