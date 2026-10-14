@@ -60,11 +60,11 @@ export function figureSvg(segments: Record<SegmentKey, Segment>, options: Figure
   const fatKgs = segmentFatKgs(segments, options.whole?.fatKg ?? null);
   const labels = keys.map(k => {
     const fat = options.mode === 'fat', kg = fat ? fatKgs[k] : null, trunk = k === 'trunk';
-    const { box: [x, y], to: [tx, ty] } = callouts[k], w = 76, h = fat ? 68 : 52;
+    const { box: [x, y], to: [tx, ty] } = callouts[k], w = trunk ? 96 : 76, h = fat ? 68 : 52;
     const bx = trunk ? x - w / 2 : x;
     const leader = trunk ? '' : `<line x1="${k.startsWith('right') ? bx + w : bx}" y1="${y + h / 2}" x2="${tx}" y2="${ty}" stroke="#a9bdb4" stroke-width="1"/><circle cx="${tx}" cy="${ty}" r="2.5" fill="#ffffff" stroke="#7f9a8f" stroke-width="1"/>`;
     return `${leader}<rect x="${bx}" y="${y}" width="${w}" height="${h}" rx="10" fill="#ffffff" fill-opacity="${trunk ? 0.92 : 1}" stroke="#d4e2da"/>`
-      + `<text x="${bx + w / 2}" y="${y + 19}" text-anchor="middle" font-size="12.5" fill="#5d7a70">${segmentNames[k]}</text>`
+      + `<text x="${bx + w / 2}" y="${y + 19}" text-anchor="middle" font-size="12.5" fill="#5d7a70">${trunk ? "軀幹（含頭頸）" : segmentNames[k]}</text>`
       + `<text x="${bx + w / 2}" y="${y + 40}" text-anchor="middle" font-size="16" font-weight="700" fill="#183d38">${value(segments[k])}</text>`
       + (fat ? `<text x="${bx + w / 2}" y="${y + 58}" text-anchor="middle" font-size="12.5" fill="#9a5418">約 ${kg === null ? '—' : kg.toFixed(2)} kg</text>` : '');
   }).join('')
