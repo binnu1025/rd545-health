@@ -9,19 +9,20 @@ export type SegmentKey = keyof BodyComposition['segments'];
 export const segmentNames: Record<SegmentKey, string> = { rightArm: '右手', leftArm: '左手', trunk: '軀幹', rightLeg: '右腳', leftLeg: '左腳' };
 
 const mirror = (d: string) => d.replace(/(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/g, (_, x, y) => `${200 - Number(x)},${y}`);
-const rightArm = 'M58,82 C47,86 42,96 41,110 L36,160 C34,176 30,194 28,212 C27,222 26,230 27,238 C26,247 30,255 36,255 C42,255 45,247 43,238 C44,228 46,216 48,204 L54,164 C56,150 58,130 58,110 Z';
-const rightLeg = 'M64,232 C62,262 64,292 69,320 L73,352 C75,372 75,390 75,404 C74,410 70,414 66,419 L95,419 C96,412 95,406 95,398 L96,352 C97,320 97,288 97,250 L97,240 Z';
+// A soft pictogram: rounded segments separated by small gaps instead of outlines (body drawn in a 200-wide box).
+const rightArm = 'M55,80 C46,81 41,88 40,98 L31,222 C30,233 34,240 41,240 C48,240 51,233 51,224 L57,122 C58,104 59,90 55,80 Z';
+const rightLeg = 'M68,247 L97,247 C97,302 95,358 93,410 C93,419 88,424 81,424 C74,424 71,419 71,410 C69,358 67,302 68,247 Z';
 const paths: Record<SegmentKey, string> = {
   rightArm, leftArm: mirror(rightArm), rightLeg, leftLeg: mirror(rightLeg),
-  trunk: 'M100,72 C88,72 74,74 64,80 C56,85 54,94 56,104 C58,124 60,140 62,156 C63,170 60,184 60,198 C60,212 62,224 66,234 C78,242 90,245 100,245 C110,245 122,242 134,234 C138,224 140,212 140,198 C140,184 137,170 138,156 C140,140 142,124 144,104 C146,94 144,85 136,80 C126,74 112,72 100,72 Z',
+  trunk: 'M77,68 C92,63 108,63 123,68 C136,72 142,80 141,93 L137,150 C136,172 137,200 137,222 C137,233 129,240 118,240 L82,240 C71,240 63,233 63,222 C63,200 64,172 63,150 L59,93 C58,80 64,72 77,68 Z',
 };
-const head = '<ellipse cx="100" cy="36" rx="21" ry="25"/><path d="M91,56 C91,64 90,69 87,74 L113,74 C110,69 109,64 109,56 Z"/>';
+const head = '<circle cx="100" cy="36" r="23"/>';
 
 // Label boxes beside each segment, and where their leader line meets the body (viewBox 300×440, body offset +50).
 const callouts: Record<SegmentKey, { box: [number, number]; to: [number, number] }> = {
-  rightArm: { box: [4, 146], to: [86, 170] }, leftArm: { box: [236, 146], to: [214, 170] },
-  trunk: { box: [120, 142], to: [150, 160] },
-  rightLeg: { box: [4, 318], to: [124, 330] }, leftLeg: { box: [236, 318], to: [176, 330] },
+  rightArm: { box: [2, 132], to: [92, 165] }, leftArm: { box: [222, 132], to: [208, 165] },
+  trunk: { box: [150, 128], to: [150, 150] },
+  rightLeg: { box: [2, 306], to: [120, 330] }, leftLeg: { box: [222, 306], to: [180, 330] },
 };
 
 export interface FigureOptions {
@@ -31,7 +32,7 @@ export interface FigureOptions {
   whole?: { fatPct: number | null; fatKg: number | null };
   colors?: Partial<Record<'above' | 'standard' | 'below' | 'unknown' | 'fat' | 'skin', string>>;
 }
-const palette = { above: '#2f8f6f', standard: '#8fbfaa', below: '#e0a35a', unknown: '#d5ddd9', fat: '#d9a77c', skin: '#e7eeea' };
+const palette = { above: '#2f8f6f', standard: '#8cc2aa', below: '#e0a35a', unknown: '#d5ddd9', fat: '#dcae86', skin: '#e3ebe7' };
 // TANITA publishes no range for its muscle score, so colour only follows its sign.
 const scoreTone = (s: number | null) => s === null ? 'unknown' : s > 0 ? 'above' : s < 0 ? 'below' : 'standard';
 
@@ -47,22 +48,22 @@ export function figureSvg(segments: Record<SegmentKey, Segment>, options: Figure
   const value = (s: Segment) => options.mode === 'muscle' ? (s.muscleKg === null ? '—' : `${s.muscleKg.toFixed(2)} kg`) : (s.fatPct === null ? '—' : `${s.fatPct.toFixed(1)} %`);
   const fill = (k: SegmentKey) => options.mode === 'fat' ? c.fat : c[scoreTone(segments[k].muscleScore)];
   const order: SegmentKey[] = ['rightArm', 'leftArm', 'rightLeg', 'leftLeg', 'trunk'];
-  const body = order.map(k => `<path d="${paths[k]}" fill="${fill(k)}" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"><title>${segmentNames[k]}：${value(segments[k])}</title></path>`).join('');
+  const body = order.map(k => `<path d="${paths[k]}" fill="${fill(k)}"><title>${segmentNames[k]}：${value(segments[k])}</title></path>`).join('');
   const labels = keys.map(k => {
-    const fat = options.mode === 'fat', kg = fat ? segmentFatKg(segments[k]) : null;
-    const { box: [x, y], to: [tx, ty] } = callouts[k], w = fat ? 66 : 60, h = fat ? 52 : 38, trunk = k === 'trunk';
-    const bx = trunk ? x - w / 2 + 30 : k.startsWith('left') ? x + 60 - w : x;
-    const leader = trunk ? '' : `<line x1="${k.startsWith('right') ? bx + w : bx}" y1="${y + h / 2}" x2="${tx}" y2="${ty}" stroke="#9fb5ab" stroke-width="1"/>`;
-    return `${leader}<rect x="${bx}" y="${y}" width="${w}" height="${h}" rx="8" fill="#ffffff" fill-opacity="${trunk ? 0.9 : 1}" stroke="#d4e2da"/>`
-      + `<text x="${bx + w / 2}" y="${y + 15}" text-anchor="middle" font-size="11" fill="#5d7a70">${segmentNames[k]}</text>`
-      + `<text x="${bx + w / 2}" y="${y + 31}" text-anchor="middle" font-size="12.5" font-weight="700" fill="#183d38">${value(segments[k])}</text>`
-      + (fat ? `<text x="${bx + w / 2}" y="${y + 46}" text-anchor="middle" font-size="11" fill="#9a5418">約 ${kg === null ? '—' : kg.toFixed(2)} kg</text>` : '');
+    const fat = options.mode === 'fat', kg = fat ? segmentFatKg(segments[k]) : null, trunk = k === 'trunk';
+    const { box: [x, y], to: [tx, ty] } = callouts[k], w = 76, h = fat ? 68 : 52;
+    const bx = trunk ? x - w / 2 : x;
+    const leader = trunk ? '' : `<line x1="${k.startsWith('right') ? bx + w : bx}" y1="${y + h / 2}" x2="${tx}" y2="${ty}" stroke="#a9bdb4" stroke-width="1"/><circle cx="${tx}" cy="${ty}" r="2.5" fill="#ffffff" stroke="#7f9a8f" stroke-width="1"/>`;
+    return `${leader}<rect x="${bx}" y="${y}" width="${w}" height="${h}" rx="10" fill="#ffffff" fill-opacity="${trunk ? 0.92 : 1}" stroke="#d4e2da"/>`
+      + `<text x="${bx + w / 2}" y="${y + 19}" text-anchor="middle" font-size="12.5" fill="#5d7a70">${segmentNames[k]}</text>`
+      + `<text x="${bx + w / 2}" y="${y + 40}" text-anchor="middle" font-size="16" font-weight="700" fill="#183d38">${value(segments[k])}</text>`
+      + (fat ? `<text x="${bx + w / 2}" y="${y + 58}" text-anchor="middle" font-size="12.5" fill="#9a5418">約 ${kg === null ? '—' : kg.toFixed(2)} kg</text>` : '');
   }).join('')
-    + (options.mode === 'fat' && options.whole ? `<rect x="4" y="6" width="96" height="46" rx="8" fill="#fbf1e6" stroke="#ecd3b8"/>`
-      + `<text x="52" y="22" text-anchor="middle" font-size="11" fill="#9a5418">全身體脂</text>`
-      + `<text x="52" y="42" text-anchor="middle" font-size="13" font-weight="700" fill="#183d38">${options.whole.fatPct === null ? '—' : options.whole.fatPct.toFixed(1) + '%'}・${options.whole.fatKg === null ? '—' : options.whole.fatKg.toFixed(1) + 'kg'}</text>` : '');
+    + (options.mode === 'fat' && options.whole ? `<rect x="0" y="2" width="104" height="58" rx="10" fill="#fbf1e6" stroke="#ecd3b8"/>`
+      + `<text x="52" y="22" text-anchor="middle" font-size="12.5" fill="#9a5418">全身體脂</text>`
+      + `<text x="52" y="46" text-anchor="middle" font-size="14.5" font-weight="700" fill="#183d38">${options.whole.fatPct === null ? '—' : options.whole.fatPct.toFixed(1) + '%'}・${options.whole.fatKg === null ? '—' : options.whole.fatKg.toFixed(1) + 'kg'}</text>` : '');
   return `<svg viewBox="0 0 300 440" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${options.mode === 'muscle' ? '部位肌肉量' : '部位體脂率'}人形圖" font-family="'Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif">
-    <g transform="translate(50 0)"><g fill="${c.skin}" stroke="#c9d8d0" stroke-width="1.5">${head}</g>${body}</g>${labels}</svg>`;
+    <g transform="translate(50 0)"><g fill="${c.skin}">${head}</g>${body}</g>${labels}</svg>`;
 }
 
 export function figureLegend(mode: 'muscle' | 'fat'): string {
