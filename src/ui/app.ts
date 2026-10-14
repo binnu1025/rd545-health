@@ -117,7 +117,11 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
             view.prepend(warn);
           }
           if (store && person && (isOwner(person) || family)) void saveRecords(store, [toRecord(person, result.measuredAt, result.detail)])
-            .then(n => { status.textContent = n ? `已存到你的試算表（${person.姓名}）。` : '這筆結果先前已存過，未重複寫入。'; render(); }, e => { status.textContent = `存檔失敗：${e instanceof Error ? e.message : e}`; });
+            .then(n => {
+              status.textContent = n ? `已存到你的試算表（${person.姓名}）。` : '這筆結果先前已存過，未重複寫入。';
+              // Once saved, show it like any saved result, which carries the export button. A height warning stays on screen instead.
+              if (fresh === view && !view.querySelector('.warn')) { fresh = null; message = status.textContent; }
+              render(); }, e => { status.textContent = `存檔失敗：${e instanceof Error ? e.message : e}`; });
         }, { stage: s => { stage = s; render(); }, profile: p => { scaleProfile = p; },
           measureFor: family ? { name: family.姓名, birthDate: family.出生日期, sex: family.性別, heightCm: Number(family.身高cm) } : undefined });
         if (mode === 'profile') message = text; else message = fresh ? '' : text;
