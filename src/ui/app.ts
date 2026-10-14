@@ -121,7 +121,7 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
               status.textContent = n ? `已存到你的試算表（${person.姓名}）。` : '這筆結果先前已存過，未重複寫入。';
               // Once saved, show it like any saved result, which carries the export button. A height warning stays on screen instead.
               if (fresh === view && !view.querySelector('.warn')) { fresh = null; message = status.textContent; }
-              render(); }, e => { status.textContent = `存檔失敗：${e instanceof Error ? e.message : e}`; });
+              backgroundRender(); }, e => { status.textContent = `存檔失敗：${e instanceof Error ? e.message : e}`; backgroundRender(); });
         }, { stage: s => { stage = s; render(); }, profile: p => { scaleProfile = p; },
           measureFor: family ? { name: family.姓名, birthDate: family.出生日期, sex: family.性別, heightCm: Number(family.身高cm) } : undefined });
         if (mode === 'profile') message = text; else message = fresh ? '' : text;
@@ -190,7 +190,7 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
         <button class="secondary" data-act="refresh">重新整理</button>
         <button class="secondary" data-act="switch-sheet">改用其他試算表</button>
         <button class="quiet" data-act="signout">登出</button></div></details>`}`;
-    section.querySelector<HTMLSelectElement>('[data-field=person]')?.addEventListener('change', e => { selectedId = (e.target as HTMLSelectElement).value; saveSelectedPerson(selectedId); fresh = null; message = ''; askFamilyConsent = false; render(); });
+    section.querySelector<HTMLSelectElement>('[data-field=person]')?.addEventListener('change', e => { (e.target as HTMLSelectElement).blur(); selectedId = (e.target as HTMLSelectElement).value; saveSelectedPerson(selectedId); fresh = null; message = ''; askFamilyConsent = false; render(); });
     const toggle = (form: string) => () => { const f = section.querySelector<HTMLFormElement>(`[data-form=${form}]`)!; f.hidden = !f.hidden; };
     on('add', toggle('member'));
     on('edit', toggle('edit'));
@@ -343,6 +343,15 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
   addEventListener('offline', () => { if (!isSignedIn() && useOfflineCopy()) render(); });
   addEventListener('online', () => { if (offline) { offline = false; store = null; message = '已恢復網路，請登入以更新資料。'; render(); } });
 
+  /** Redraw for something that happened in the background; waits until the user leaves the field they are using. */
+  function backgroundRender() {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && section.contains(active) && active.matches('select, input, textarea')) {
+      active.addEventListener('blur', () => setTimeout(render, 0), { once: true });
+      return;
+    }
+    render();
+  }
   function render() {
     if (offline && store) homeView();
     else if (!store || !isSignedIn()) signInView();
@@ -350,4 +359,10 @@ export function mountApp(root: HTMLElement, probe: BleProbe, run: Run) {
   }
   if (!navigator.onLine) useOfflineCopy();
   render();
+  if (navigator.onLine && isSignedIn()) void (async () => {
+    busy = true; message = '正在開啟你的試算表…'; render();
+    try { const id = local.get(sheetIdKey(signedInEmail())); await (id ? openSheet(id) : Promise.reject()).catch(async () => openSheet(await findOrCreate())); message = ''; }
+    catch (e) { fail(e); }
+    busy = false; render();
+  })();
 }

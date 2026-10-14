@@ -30,3 +30,9 @@ it('decodes sex / birth / height from a synthetic scale profile and skips the ni
   expect(ageAt(p.birthDate, new Date('2025-12-31T16:00:00Z'))).toBe(36); // 00:00 Taipei on the birthday
   const unknown = f.slice(); unknown[5] = 0x12; expect(decodeScaleProfile(unknown)).toBeNull();
 });
+it('converts the body-fat range to kilograms for body fat mass', async () => {
+  const { fatMassRange } = await import('../src/health/standards');
+  const r = fatMassRange('male', 87.85);
+  expect([r.low, r.high]).toEqual([13.18, 21.96]);   // 87.85 × 15 % … × 25 %
+  expect(fatMassRange('female', 60)).toMatchObject({ low: 12, high: 18 });
+});

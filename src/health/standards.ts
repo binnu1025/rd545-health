@@ -58,6 +58,12 @@ export function appendicularMuscleIndex(limbsKg: (number | null)[], heightCm: nu
   return Math.round((limbsKg as number[]).reduce((a, b) => a + b, 0) / (heightCm / 100) ** 2 * 100) / 100;
 }
 
+// Body fat mass: the MOHW body-fat percentage range applied to the person's own weight.
+export function fatMassRange(sex: Sex, weightKg: number): Range {
+  const r = bodyFatRange(sex), kg = (pct: number) => Math.round(weightKg * pct) / 100;
+  return { ...r, low: kg(r.low), high: kg(r.high), source: `${taiwanMohw}（體脂率標準 × 體重）` };
+}
+
 export type Judgement = 'low' | 'normal' | 'high';
 export function judge(value: number, range: Range): Judgement {
   if (value < range.low) return 'low';

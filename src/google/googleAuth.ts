@@ -14,6 +14,9 @@ declare global { interface Window { google?: { accounts: { oauth2: {
 } } } } }
 
 let token = '', expiresAt = 0, email = '';
+const sessionKey = 'rd545.googleSession';
+try { const s = JSON.parse(sessionStorage.getItem(sessionKey) ?? 'null'); if (s && s.expiresAt > Date.now()) ({ token, expiresAt, email } = s); } catch { /* none kept */ }
+const keepSession = () => { try { if (token) sessionStorage.setItem(sessionKey, JSON.stringify({ token, expiresAt, email })); else sessionStorage.removeItem(sessionKey); } catch { /* visit-only */ } };
 let client: TokenClient | null = null, pending: { resolve: (t: string) => void; reject: (e: Error) => void } | null = null;
 
 function loadScript(): Promise<void> {
@@ -48,12 +51,13 @@ export async function signIn(): Promise<string> {
   const me = await googleFetch<{ email: string }>('https://www.googleapis.com/oauth2/v3/userinfo');
   email = me.email;
   try { localStorage.setItem(hintKey, email); } catch { /* visit-only */ }
+  keepSession();
   return email;
 }
 
 export function signOut() {
   if (token) window.google?.accounts.oauth2.revoke(token);
-  token = ''; expiresAt = 0; email = '';
+  token = ''; expiresAt = 0; email = ''; keepSession();
   try { localStorage.removeItem(hintKey); } catch { /* visit-only */ }
 }
 
