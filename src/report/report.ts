@@ -98,7 +98,7 @@ export function buildReportSvg(input: ReportInput, scale = 1): string {
   out += `<text x="56" y="${y + 40}" font-size="${nameSize}" font-weight="800" fill="${ink}">${xml(input.name)}</text>`;
   out += info.map(([k, v], i) => `<text x="${60 + nameW + i * colW}" y="${y + 4}" font-size="15" fill="${muted}">${k}</text><text x="${60 + nameW + i * colW}" y="${y + 36}" font-size="${k === '量測時間' ? 20 : 25}" font-weight="700" fill="${ink}">${xml(v)}</text>`).join('');
   y += 76;
-  for (const [title, labels] of [['肌肉脂肪分析', ['體重', '體脂肪重', '四肢肌肉指數']], ['肥胖分析', ['BMI', '體脂率', '內臟脂肪']], ['其他指標', ['體水分率', '肌肉品質', '代謝年齡', '肌肉評分']]] as const) {
+  for (const [title, labels] of [['肌肉脂肪分析', ['體重', '四肢肌肉指數']], ['肥胖分析', ['BMI', '體脂率', '體脂肪重', '內臟脂肪']], ['其他指標', ['體水分率', '肌肉品質', '代謝年齡', '肌肉評分']]] as const) {
     out += section(y, title); y += 52;
     const b = bars(pick(...labels), y); out += b.svg; y += b.height + 8;
   }
